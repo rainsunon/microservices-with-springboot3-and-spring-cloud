@@ -217,3 +217,29 @@ spring init \
 product-composite-service
 ```
 
+### Build all microservices.
+```
+./gradlew build
+```
+
+
+#### Adding RESTful API
+
+##### Build, run, execute and kill
+```
+./gradlew build
+java -jar microservices/product-service/build/libs/*.jar &
+curl http://localhost:7001/product/123
+kill $(jobs -p)
+```
+
+./gradlew build 를 실행하면 보통의 jar파일과 class 파일들만 포함된 plain jar파일이 생성된다. plain jar는 필요치 않기 때문에 각 서비스의 build.gradle에 이하의 코드를 추가했다.
+
+```
+jar {
+    enabled = false
+}
+```
+참조) https://docs.spring.io/spring-boot/docs/3.0.4/gradle-plugin/reference/htmlsingle/#packaging-executable.and-plain-archives
+
+
