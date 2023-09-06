@@ -1,3 +1,4 @@
+
 # microservices-with-springboot3-and-spring-cloud
 https://www.packtpub.com/product/microservices-with-spring-boot-3-and-spring-cloud-third-edition/9781805128694#_ga=2.83151446.1164592500.1693901026-1509796819.1686212940
 
@@ -144,7 +145,21 @@ https://www.packtpub.com/product/microservices-with-spring-boot-3-and-spring-clo
 ![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_16.png)
 
 
+## 소프트웨어 
 
+우리는 마이크로서비스에 대한 기대를 충족시키고, 무엇보다 중요하게는 그들과 함께 오는 새로운 도전을 처리하는 데 도움을 줄 수 있는 매우 좋은 오픈 소스 도구들을 가지고 있다.
+
+Design Pattern|Spring Boot|Spring Cloud|Kubernetes|Istio
+|---------|---------|--------|-------|-------|
+**Service discovery**|Netflix Eureka and Spring Cloud LoadBalancer|Kubernetes kube-proxy and service resources
+**Edge server**||Spring Cloud Gateway and Spring Security OAuth|Kubernetes Ingress controller|Istio ingress gateway
+**Reactive microservices**|Project Reactor and Spring WebFlux
+**Central configuration**||Spring Config Server|Kubernetes ConfigMaps and Secrets
+**Centralized log analysis**|||Elasticsearch, Fluentd, and Kibana. Note: Actually not part of Kubernetes, but can easily be deployed and configured together with Kubernetes
+**Distributed tracing**|Micrometer Tracing and Zipkin|||Jaeger
+**Circuit breaker**|Resilience4j|||Outlier detection
+**Control loop**|||Kubernetes controller managers
+**Centralized monitoring and alarms**||||Kiali, Grafana, and Prometheus
 
 
 
