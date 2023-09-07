@@ -264,3 +264,96 @@ jar {
 참조) https://docs.spring.io/spring-boot/docs/3.0.4/gradle-plugin/reference/htmlsingle/#packaging-executable.and-plain-archives
 
 
+## Deploying Our Microservices Using Docker
+
+Docker 이미지에서 fat JAR 파일의 최적화되지 않은 패키징을 처리할 때 fat JAR 파일의 콘텐츠를 여러 폴더로 추출할 수 있다.
+기본적으로 Spring Boot는 fat JAR 파일을 추출한 후 다음 폴더를 생성한다.
+
+- dependencies, 모든 종속성을 JAR 파일로 포함  
+- spring-boot-loader, Spring Boot 애플리케이션을 시작하는 방법을 알고 있는 Spring Boot 클래스를 포함  
+- snapshot-dependencies, 만약 있다면 스냅샷 종속성을 포함  
+- application, 애플리케이션 클래스 파일과 리소스를 포함  
+
+Spring Boot 문서는 위에 나열된 순서대로 각 폴더마다 하나의 Docker 레이어를 생성하는 것을 권장한다.
+JDK 기반 Docker 이미지를 JRE 기반 이미지로 대체하고, fat JAR 파일을 Docker 이미지에서 적절한 레이어로 풀어내는 지시사항을 추가한 Dockerfile은 다음과 같다.
+
+```dockerfile
+FROM eclipse-temurin:17.0.5_8-jre-focal as builder
+WORKDIR extracted
+ADD ./build/libs/*.jar app.jar
+RUN java -Djarmode=layertools -jar app.jar extract
+FROM eclipse-temurin:17.0.5_8-jre-focal
+WORKDIR application
+COPY --from=builder extracted/dependencies/ ./
+COPY --from=builder extracted/spring-boot-loader/ ./
+COPY --from=builder extracted/snapshot-dependencies/ ./
+COPY --from=builder extracted/application/ ./
+EXPOSE 8080
+ENTRYPOINT ["java", "org.springframework.boot.loader.JarLauncher"]
+```
+
+Dockerfile 작성 후 빌드
+
+```shell
+./gradlew :microservices:product-service:build
+cd microservices/product-service
+docker build -t product-service .
+docker images | grep product-service
+docker run --rm -p8080:8080 -e "SPRING_PROFILES_ACTIVE=docker" product-service
+curl localhost:8080/product/3
+```
+
+Running the container in detach mode
+```shell
+docker run -d -p8080:8080 -e "SPRING_PROFILES_ACTIVE=docker" --name my-prd-srv product-service
+docker logs my-prd-srv -f
+docker rm -f my-prd-srv
+```
+
+docker-compose.yml
+```yaml
+version: '2.1'
+services:
+  product:
+    build: microservices/product-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+  recommendation:
+    build: microservices/recommendation-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+  review:
+    build: microservices/review-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+  product-composite:
+    build: microservices/product-composite-service
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+```
+
+docker compose execute
+```shell
+./gradlew build
+docker-compose build
+docker images
+docker-compose up -d
+docker-compose logs -f
+curl localhost:8080/product-composite/123 -s | jq .
+docker-compose down
+```
+
+automating tests run
+```shell
+./test-em-all.bash start stop
+```
+
+
+
+
