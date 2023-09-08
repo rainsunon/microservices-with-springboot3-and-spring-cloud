@@ -314,7 +314,7 @@ docker-compose.yml
 ```yaml
 version: '2.1'
 services:
-  product:
+  product: # hostname
     build: microservices/product-service
     mem_limit: 512m
     environment:
@@ -354,6 +354,147 @@ automating tests run
 ./test-em-all.bash start stop
 ```
 
+## Adding an API Description Using OpenAPI
 
+product-composite-service/application.yml
+```yaml
+springdoc:
+  swagger-ui.path: /openapi/swagger-ui.html
+  api-docs.path: /openapi/v3/api-docs
+  packagesToScan: se.magnus.microservices.composite.product
+  pathsToMatch: /**
 
+api:
+
+  common:
+    version: 1.0.0
+    title: Sample API
+    description: Description of the API...
+    termsOfService: MY TERMS OF SERVICE
+    license: MY LICENSE
+    licenseUrl: MY LICENSE URL
+
+    externalDocDesc: MY WIKI PAGE
+    externalDocUrl: MY WIKI URL
+    contact:
+      name: NAME OF CONTACT
+      url: URL TO CONTACT
+      email: contact@mail.com
+
+  responseCodes:
+    ok.description: OK
+    badRequest.description: Bad Request, invalid format of the request. See response message for more information
+    notFound.description: Not found, the specified id does not exist
+    unprocessableEntity.description: Unprocessable entity, input parameters caused the processing to fail. See response message for more information
+
+  product-composite:
+
+    get-composite-product:
+      description: Returns a composite view of the specified product id
+      notes: |
+        # Normal response
+        If the requested product id is found the method will return information regarding:
+        1. Base product information
+        1. Reviews
+        1. Recommendations
+        1. Service Addresses\n(technical information regarding the addresses of the microservices that created the response)
+
+        # Expected partial and error responses
+        In the following cases, only a partial response be created (used to simplify testing of error conditions)
+
+        ## Product id 113
+        200 - Ok, but no recommendations will be returned
+
+        ## Product id 213
+        200 - Ok, but no reviews will be returned
+
+        ## Non numerical product id
+        400 - A **Bad Request** error will be returned
+
+        ## Product id 13
+        404 - A **Not Found** error will be returned
+
+        ## Negative product ids
+        422 - An **Unprocessable Entity** error will be returned
+```
+
+product-composite-service/ProductCompositeServiceApplication.java
+```java
+  @Value("${api.common.version}")         String apiVersion;
+  @Value("${api.common.title}")           String apiTitle;
+  @Value("${api.common.description}")     String apiDescription;
+  @Value("${api.common.termsOfService}")  String apiTermsOfService;
+  @Value("${api.common.license}")         String apiLicense;
+  @Value("${api.common.licenseUrl}")      String apiLicenseUrl;
+  @Value("${api.common.externalDocDesc}") String apiExternalDocDesc;
+  @Value("${api.common.externalDocUrl}")  String apiExternalDocUrl;
+  @Value("${api.common.contact.name}")    String apiContactName;
+  @Value("${api.common.contact.url}")     String apiContactUrl;
+  @Value("${api.common.contact.email}")   String apiContactEmail;
+
+  /**
+  * Will exposed on $HOST:$PORT/swagger-ui.html
+  *
+  * @return the common OpenAPI documentation
+  */
+  @Bean
+  public OpenAPI getOpenApiDocumentation() {
+    return new OpenAPI()
+      .info(new Info().title(apiTitle)
+        .description(apiDescription)
+        .version(apiVersion)
+        .contact(new Contact()
+          .name(apiContactName)
+          .url(apiContactUrl)
+          .email(apiContactEmail))
+        .termsOfService(apiTermsOfService)
+        .license(new License()
+          .name(apiLicense)
+          .url(apiLicenseUrl)))
+      .externalDocs(new ExternalDocumentation()
+        .description(apiExternalDocDesc)
+        .url(apiExternalDocUrl));
+  }
+```
+
+product-composite-service/ProductCompositeService.java
+```java
+@Tag(name = "ProductComposite", description = "REST API for composite product information.")
+public interface ProductCompositeService {
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product-composite/1".
+   *
+   * @param productId Id of the product
+   * @return the composite product info, if found, else null
+   */
+  @Operation(
+    summary = "${api.product-composite.get-composite-product.description}",
+    description = "${api.product-composite.get-composite-product.notes}")
+  @ApiResponses(value = {
+    @ApiResponse(responseCode = "200", description = "${api.responseCodes.ok.description}"),
+    @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
+    @ApiResponse(responseCode = "404", description = "${api.responseCodes.notFound.description}"),
+    @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
+  })
+  @GetMapping(
+    value = "/product-composite/{productId}",
+    produces = "application/json")
+  ProductAggregate getProduct(@PathVariable int productId);
+}
+```
+
+```shell
+./gradlew build && docker-compose build && docker-compose up -d
+```
+
+#### Open Swagger UI viewer
+http://localhost:8080/openapi/swagger-ui.html
+
+productId에 '123' 입력하고 Execute 해본다.
+
+#### 같은 결과
+```shell
+curl -X GET "http://localhost:8080/product-composite/123" -H "accept: application/json"
+```
 
