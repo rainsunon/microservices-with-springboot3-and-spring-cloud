@@ -498,3 +498,82 @@ productId에 '123' 입력하고 Execute 해본다.
 curl -X GET "http://localhost:8080/product-composite/123" -H "accept: application/json"
 ```
 
+## Adding Persistence
+
+#### Product, Recommendation - Spring Data for MongoDB  
+#### Review - Spring Data for the JPA to access a MySQL database
+
+- 핵심 마이크로서비스에 영속성 레이어 추가하기
+- 영속성에 중점을 둔 자동 테스트 작성하기
+- 서비스 레이어에서 영속성 레이어 사용하기
+- 복합 서비스 API 확장하기
+- Docker Compose 환경에 데이터베이스 추가하기
+- 새로운 API와 영속성 레이어의 수동 테스트 진행하기
+- 마이크로서비스 환경의 자동 테스트 업데이트하기
+
+
+### *최종 목표 레이어 구조*
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_06_01.png)
+
+#### testContainers를 사용할 때의 단점은 매번 Docker 컨테이너를 기동하기 때문에 시간이 걸린다는 것이다. 복수의 테스트 케이스를 기동하게 되면 케이스의 수에 따라
+시간이 증가하게 되는데 이는 테스트를 수행하는 개발자의 생산성을 저하시키는 요인이 될 수 있다. 이를 해결하기 위해 Single Container Pattern(https://www.testcontainers.org/test_framework_integration/manual_lifecycle_control/#singleton-containers)을
+사용할 수 있다. 이 패턴을 따르면 base class는 하나의 MySQL 도커 컨테이너를 기동한다. base class는 Review에서 쓰이는 MySqlTestBase.java이다.
+
+```java
+public abstract class MySqlTestBase {
+  private static MySQLContainer database =
+    new MySQLContainer("mysql:8.0.32").withStartupTimeoutSeconds(300);
+  
+  static {
+    database.start();
+  }
+  @DynamicPropertySource
+  static void databaseProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", database::getJdbcUrl);
+    registry.add("spring.datasource.username", database::getUsername);
+    registry.add("spring.datasource.password", database::getPassword);
+  }
+}
+```
+---
+> - 데이터베이스 컨테이너는 앞선 예제와 같은 방식으로 선언되며, 컨테이너가 시작하는 데 5분의 확장 대기 시간이 추가된다.
+> - 정적 블록은 JUnit 코드가 호출되기 전에 데이터베이스 컨테이너를 시작하는 데 사용된다.
+> - 데이터베이스 컨테이너는 시작할 때 몇 가지 속성을 정의받게 된다. 예를 들어 어떤 포트를 사용할 것인지 등이다. 이러한 동적으로 생성된 속성들을 애플리케이션 컨텍스트에 등록하기 위해, static method인 databaseProperties()가 정의된다. 이 메서드는 @DynamicPropertySource로 주석 처리되어 애플리케이션 컨텍스트 내의 데이터베이스 구성을 오버라이드한다. 예를 들어 application.yml 파일에서 가져온 구성 등이다.
+---
+> - @DataMongoTest: 이 주석은 테스트가 시작될 때 MongoDB 데이터베이스를 시작한다.
+> - @DataJpaTest: 이 주석은 테스트가 시작될 때 SQL 데이터베이스를 시작한다.
+> - 기본적으로, Spring Boot는 SQL 데이터베이스에 대한 업데이트를 롤백하여 다른 테스트에 부정적인 영향을 최소화하도록 테스트를 구성한다. 하지만 우리의 경우, 이런 동작은 일부 테스트 실패를 유발하게 될것이다. 따라서, 클래스 레벨의 주석 @Transactional(propagation = NOT_SUPPORTED)을 사용하여 자동 롤백을 비활성화 한다.
+---
+
+#### Product - PersistenceTests 테스트
+```shell
+./gradlew microservices:product-service:test --tests PersistenceTests
+```
+
+productId에 @Indexed 어노테이션을 unique = true 로 걸어주었다.  
+이렇게 설정하면 productId를 기준으로 indexing 테이블이 생성되고 중복된 productId를 가진 Entity의 생성을 금지한다.  
+하지만 중복된 productId를 가진 객체가 잘 저장되는 상황이었다.  
+mongodb 3.0 이후부터 컬렉션 라이프 사이클과 퍼포먼스에 영향을 주는 것을 막기 위해서 Index creation을 반드시 명시적으로 enable 해주어야 한다고 한다.  
+명시적으로 enable 해주기 위해서는 아래와 같이 application.yml 을 설정한다.
+```yaml
+# application.yml
+
+spring:
+  data:
+    mongodb:
+      auto-index-creation: true
+```
+
+### 수동 테스트 Manual tests of the new APIs and the persistence layer
+    
+```shell
+./gradlew build && docker-compose build && docker-compose up
+# http://localhost:8080/openapi/webjars/swagger-ui/index.html 접속
+# /product-composite 임의의 productId 입력 후 Execute 
+docker-compose exec mongodb mongosh product-db --quiet --eval "db.products.find()"
+docker-compose exec mongodb mongosh recommendation-db --quiet --eval "db.recommendations.find()"
+docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
+
+# get, delete swagger api 모두 테스트 가능
+```
+
