@@ -576,4 +576,621 @@ docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
 
 # get, delete swagger api 모두 테스트 가능
 ```
+---
+## Developing Reactive Microservices
+
+> - product-composite 마이크로서비스에 의해 제공되는 생성, 읽기, 삭제 서비스는 비차단 동기 API를 기반으로 할 것이다. composite 마이크로서비스는 웹 및 모바일 플랫폼에서 클라이언트를 가정하고 있으며, 시스템 환경을 운영하는 조직 외부에서 오는 클라이언트도 가정하고 있다. 따라서 동기 API가 자연스럽다.
+> - core 마이크로서비스가 제공하는 읽기 서비스도 사용자의 응답을 기다리는 종단 사용자가 있으므로 non-blocking 동기 API로 개발될 것이다.
+> - core 마이크로서비스가 제공하는 생성 및 삭제 서비스는 이벤트 기반의 비동기 서비스로 개발될 것으로, 이것은 각 마이크로서비스에 전용된 주제에서 생성 및 삭제 이벤트를 수신한다는 뜻이다.
+> - composite 마이크로서비스에 의해 제공되는 동기 API들은 집계된 제품 정보를 생성하고 삭제하기 위해 이러한 topic에 대한 생성 및 삭제 이벤트를 발행할 것이다. 만약 게시 작업이 성공하면 202 (수락됨) 응답으로 반환할 것이며, 그렇지 않으면 오류 응답을 반환할 것이다. 202 응답은 일반적인 200 (OK) 응답과 다르게 – 요청이 수락되었지만 완전히 처리되지 않았음을 나타낸다. 대신 처리 과정은 202응답과 독립적으로 비동기적으로 완료될 것이다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_07_01.png)
+
+### Non-blocking REST API 구현
+
+> - API들이 반응형 데이터 타입만 반환하도록 변경하기
+> - 서비스 구현을 변경하여 차단 코드를 포함하지 않도록 하기
+> - 테스트를 변경하여 반응형 서비스를 테스트할 수 있게 하기
+> - 차단 코드 처리 - 아직 차단이 필요한 코드와 비차단 코드를 분리하기
+
+
+### Blocking code 다루기
+리뷰 서비스의 경우, 관계형 데이터베이스에서 데이터에 접근하기 위해 JPA를 사용하는데, 이는 비차단 프로그래밍 모델을 지원하지 않는다. 대신에, blocking 코드를 실행하는 데 능한 스케줄러를 사용하여 한정된 수의 스레드가 있는 전용 스레드 풀에서 blocking 코드를 실행할 수 있다. blocking 코드에 대해 스레드 풀을 사용하면 마이크로서비스에서 사용 가능한 스레드가 소진되는 것을 방지하고, 만약 있다면 마이크로서비스 내의 동시 non-blocking 처리에 영향을 주지 않게 한다.  
+
+1. 스케쥴러 빈을 등록한다.
+```java
+@Autowired
+public ReviewServiceApplication(
+  @Value("${app.threadPoolSize:10}") Integer threadPoolSize,
+  @Value("${app.taskQueueSize:100}") Integer taskQueueSize
+) {
+  this.threadPoolSize = threadPoolSize;
+  this.taskQueueSize = taskQueueSize;
+}
+@Bean
+public Scheduler jdbcScheduler() {
+  return Schedulers.newBoundedElastic(threadPoolSize,
+    taskQueueSize, "jdbc-pool");
+}
+```
+
+2. 서비스에서 jdbcScheduler를 주입한다.
+```java
+@RestController
+public class ReviewServiceImpl implements ReviewService {
+  private final Scheduler jdbcScheduler;
+  @Autowired
+  public ReviewServiceImpl(
+    @Qualifier("jdbcScheduler")
+    Scheduler jdbcScheduler, ...) {
+    this.jdbcScheduler = jdbcScheduler;
+  }
+```
+
+3. 마지막으로 리액티브 구현에서 scheduler 스레드풀을 사용한다.
+```java
+@Override
+public Flux<Review> getReviews(int productId) {
+  if (productId < 1) {
+    throw new InvalidInputException("Invalid productId: " + 
+      productId);
+  }
+  LOG.info("Will get reviews for product with id={}", 
+    productId);
+  return Mono.fromCallable(() -> internalGetReviews(productId))
+    .flatMapMany(Flux::fromIterable)
+    .log(LOG.getName(), FINE)
+    .subscribeOn(jdbcScheduler);
+}
+private List<Review> internalGetReviews(int productId) {
+  List<ReviewEntity> entityList = repository.
+    findByProductId(productId);
+  List<Review> list = mapper.entityListToApiList(entityList);
+  list.forEach(e -> e.setServiceAddress(serviceUtil.
+    getServiceAddress()));
+  LOG.debug("Response size: {}", list.size());
+  return list;
+}
+```
+
+여기서 차단 코드는 internalGetReviews() 메서드에 위치해 있고, Mono.fromCallable() 메서드를 사용해 Mono 객체로 감싸져 있다. getReviews() 메서드는 subscribeOn() 메서드를 사용해서 jdbcScheduler의 스레드 풀에서 차단 코드를 실행하게 된다.  
+나중에 테스트를 돌려보면, 리뷰 서비스로부터 로그 출력을 확인할 수 있다. 그리고 SQL 문장들이 스케줄러의 전용 풀에서 실행되는 걸 확인할 수 있다.
+
+
+
+### Non-blocking REST APIs in the composite services
+> - API를 변경하여 작업이 반응형 데이터 유형만 반환하도록 한다.
+> - 서비스 구현을 변경하여 코어 데이터 서비스의 API를 병렬로 호출하고 블로킹되지 않는 방식으로 한다.
+> - 통합 레이어를 변경하여 블로킹되지 않는 HTTP 클라이언트를 사용한다.
+> - 리액티브 서비스를 테스트할 수 있도록 테스트를 변경한다.
+
+
+#### *API의 변경 사항*
+복합 서비스의 API를 반응형으로 만들기 위해서는 이전에 설명한 코어 서비스의 API에 적용한 것과 동일한 유형의 변경을 적용해야 한다. 이는 getProduct() 메서드의 반환 유형인 ProductAggregate를 Mono<ProductAggregate>로 대체해야 함을 의미한다.
+
+createProduct() 및 deleteProduct() 메서드는 void 대신 Mono<Void>를 반환하도록 업데이트되어야 한다. 그렇지 않으면 오류 응답을 API 호출자에게 전달할 수 없다.
+
+#### *서비스 구현에서의 변경 사항*
+세 개의 API를 병렬로 호출하기 위해 서비스 구현은 Mono 클래스의 정적 zip() 메서드를 사용한다. zip 메서드는 여러 개의 병렬 반응형 요청을 처리하고 모든 요청이 완료되면 이들을 함께 묶어준다. 코드는 다음과 같다.
+
+```java
+@Override
+public Mono<ProductAggregate> getProduct(int productId) {
+  return Mono.zip(
+    
+    values -> createProductAggregate(
+      (Product) values[0], 
+      (List<Recommendation>) values[1], 
+      (List<Review>) values[2], 
+      serviceUtil.getServiceAddress()),
+      
+    integration.getProduct(productId),
+    integration.getRecommendations(productId).collectList(),
+    integration.getReviews(productId).collectList())
+      
+    .doOnError(ex -> 
+      LOG.warn("getCompositeProduct failed: {}", 
+      ex.toString()))
+    .log(LOG.getName(), FINE);
+}
+```
+> - zip 메서드의 첫 번째 매개변수는 'values'라는 배열로 응답을 받는 람다 함수다. 이 배열에는 제품, 추천 목록, 리뷰 목록이 포함된다. 세 개의 API 호출로부터의 응답 집계는 이전과 동일한 helper 메서드인 createProductAggregate()가 처리하며, 어떠한 변경도 없다.
+> - 람다 함수 이후의 매개변수들은 zip 메서드가 병렬로 호출할 요청들의 목록으로, 각 요청마다 하나씩 Mono 객체이다. 우리 경우에는 통합 클래스의 메서드에 의해 생성된 세 개의 Mono 객체를 보내며, 각각은 각 코어 마이크로서비스에 전송되는 요청에 대응한다.
+
+#### WebClient를 통해 non-blocking HTTP 호출하기
+```java
+@Override
+public Mono<Product> getProduct(int productId) {
+  String url = productServiceUrl + "/product/" + productId;
+  return webClient.get().uri(url).retrieve()
+    .bodyToMono(Product.class)
+    .log(LOG.getName(), FINE)
+    .onErrorMap(WebClientResponseException.class, 
+      ex -> handleException(ex)
+    );
+}
+```
+
+제품 서비스에 대한 API 호출이 HTTP 오류 응답으로 실패하면 전체 API 요청이 실패한다. WebClient의 onErrorMap() 메서드는 우리의 handleException(ex) 메서드를 호출하며, 이 메서드는 HTTP 계층에서 발생하는 HTTP 예외를 우리 자체의 예외, 예를 들어 NotFoundException 또는 InvalidInputException으로 매핑한다.
+
+그러나 제품 서비스에 대한 호출이 성공하지만 추천 또는 리뷰 API에 대한 호출이 실패하는 경우, 전체 요청이 실패하도록 하고 싶지 않다. 대신 가능한 한 많은 정보를 호출자에게 반환하려고 한다. 따라서 이러한 경우에 예외를 전파하는 대신, 추천 혹은 리뷰의 빈 목록을 반환할 것이다. 오류를 억제하기 위해 onErrorResume(error -> empty())을 호출할 것이다. 코드는 다음과 같다.
+
+```java
+@Override
+public Flux<Recommendation> getRecommendations(int productId) {
+  String url = recommendationServiceUrl + "/recommendation?
+  productId=" + productId;
+  // Return an empty result if something goes wrong to make it 
+  // possible for the composite service to return partial responses
+  return webClient.get().uri(url).retrieve()
+    .bodyToFlux(Recommendation.class)
+    .log(LOG.getName(), FINE)
+    .onErrorResume(error -> empty());
+}
+```
+
+### - 이벤트 주도 비동기 서비스 개발
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_07_07.png)
+
+> - 메시징에 대한 도전 문제 처리
+> - 토픽과 이벤트 정의
+> - Gradle 빌드 파일에서의 변경 사항
+> - 코어 서비스에서 이벤트 소비
+> - 복합 서비스에서 이벤트 발행
+
+동기 API 호출보다 비동기 메시지 전송을 선호하더라도, 그 자체로 도전적인 문제들이 따른다. 우리는 Spring Cloud Stream을 어떻게 사용하여 이러한 문제 중 일부를 처리할 수 있는지 살펴볼 것이다. Spring Cloud Stream의 다음 기능에 대해 다룬다.
+
+> - 소비자 그룹
+> - 재시도와 데드-레터 큐
+> - 보장된 순서와 파티션
+
+#### 소비자 그룹
+문제는 메시지 소비자의 인스턴스 수를 늘리면, 예를 들어 제품 마이크로서비스의 인스턴스를 두 개 시작하면, 제품 마이크로서비스의 두 인스턴스 모두 동일한 메시지를 소비하게 된다는 것이다. 이는 다음 다이어그램으로 설명된다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_07_08.png)
+
+이로 인해 한 메시지가 두 번 처리되어 데이터베이스에 중복 또는 원치 않는 불일치가 발생할 수 있다. 따라서 우리는 각 메시지를 처리하기 위해 소비자당 하나의 인스턴스만이 필요하다. 이 문제는 다음 다이어그램에서 보여주듯이 소비자 그룹을 도입함으로써 해결할 수 있다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_07_09.png)
+
+
+Spring Cloud Stream에서는 consumer 측에서 consumer 그룹을 설정할 수 있다. 예를 들어, product 마이크로서비스의 경우 다음과 같이 설정한다.
+```yaml
+spring.cloud.stream:
+  bindings.messageProcessor-in-0:
+    destination: products
+    group: productsGroup
+```
+
+> - Spring Cloud Stream은 기본적으로 함수에 구성을 바인딩하기 위한 명명 규칙을 적용한다. 함수로 전송된 메시지의 경우, 바인딩 이름은 <함수이름>-in-<인덱스> 이다:
+>   + 함수이름은 앞서 예에서의 함수, messageProcessor의 이름이다.
+>   + 인덱스는 함수가 여러 입력 또는 출력 인수를 필요로 하는 경우를 제외하고는 0으로 설정된다. 우리는 다중 인수 함수를 사용하지 않으므로, 예제에서 인덱스는 항상 0으로 설정된다.
+>   + 나가는 메시지의 경우, 바인딩 이름 규칙은 <함수이름>-out-<인덱스>이다.
+> - destination 속성은 메시지가 소비될 토픽의 이름을 지정하며, 이 경우에는 products이다.
+> - group 속성은 제품 마이크로서비스의 인스턴스를 추가할 소비자 그룹을 지정하며, 이 예에서는 productsGroup이다. 이것은 products 토픽에 전송된 메시지가 Spring Cloud Stream에 의해 제품 마이크로서비스의 인스턴스 중 하나만 전달되게 함을 의미한다.
+
+#### 재시도와 배달불능 큐
+메시지 처리에 실패한 소비자의 경우, 메시지가 성공적으로 처리될 때까지 다시 큐에 넣을 수 있다.
+메시지 내용이 유효하지 않다면, 즉 '독성 메시지(poisoned message)'인 경우, 해당 메시지는 다른 메시지를 처리하는 소비자를 막게 되며 이는 수동으로 제거될 때까지 지속된다.
+만약 실패가 일시적인 문제로 인한 것이라면, 예를 들어 일시적인 네트워크 오류로 인해 데이터베이스에 접근할 수 없는 경우, 여러 번의 재시도 후에 처리가 성공할 확률이 높다.
+
+메세지가 결함 분석 및 수정을 위해 다른 저장소로 이동되기 전까지 재시도 횟수를 지정할 수 있어야 합니다. 실패한 메세지는 일반적으로 '데드레터 큐(배달불능 큐)'라고 부르는 전용 큐로 옮겨진다.
+예를 들어 네트워크 오류와 같은 일시적인 실패 상황에서 인프라 과부하를 피하기 위해서는 재 시도 횟수와 각 재 시도 사이의 시간 간격을 점차 늘려서 구성할 수 있어야 한다.
+
+Spring Cloud Stream에서 이러한 설정은 소비자 측에서 구성할 수 있으며, 예를 들어 product 마이크로서비스에서 보여주듯이 가능하다.
+
+```yaml
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  maxAttempts: 3
+  backOffInitialInterval: 500
+  backOffMaxInterval: 1000
+  backOffMultiplier: 2.0
+spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+  autoBindDlq: true
+  republishToDlq: true
+spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+  enableDlq: true
+```
+
+위 예시에서, 메시지를 데드레터 큐에 넣기 전에 Spring Cloud Stream이 3번의 재시도를 수행하도록 지정했다.
+첫 번째 재시도는 500ms 후에 시도되고, 나머지 두 번의 시도는 1000ms 후에 이루어진다.
+데드레터 큐의 사용을 활성화하는 것은 binding-specific이므로, RabbitMQ와 Kafka 각각에 대한 설정이 있다.
+
+#### 보장된 순서와 파티션
+만약 비즈니스 로직에서 메시지가 전송된 순서대로 소비되고 처리되어야 한다면, 처리 성능을 높이기 위해 소비자 당 여러 인스턴스를 사용할 수 없다.
+예를 들어, consumer 그룹을 사용할 수 없다. 이는 경우에 따라 들어오는 메시지의 처리에서 허용할 수 없는 지연을 초래할 수 있다.
+성능과 확장성을 잃지 않으면서 메시지가 전송된 순서대로 전달되도록 하기 위해 파티션을 사용할 수 있다.
+대부분의 경우, 메시지 처리에서 엄격한 순서는 동일한 비즈니스 엔티티에 영향을 주는 메시지에 대해서만 필요하다.
+예를 들어, 제품 ID 1에 영향을 주는 메시지는 제품 ID 2에 영향을 주는 메시지와 독립적으로 처리될 수 있는 경우가 많다.
+즉, 순서가 보장되어야 하는 것은 동일한 제품 ID를 가진 메시지뿐이다.  
+이를 해결하기 위해 각 메시지마다 키를 지정할 수 있도록 하여, 키가 같은 메시지 사이의 순서가 유지될 수 있도록 메시징 시스템이 보장할 수 있게 한다.
+이것은 토픽 내에서 서브 토픽 또는 파티션으로 알려진 것들을 도입함으로써 해결될 수 있다. 메시징 시스템은 키를 기반으로하여 메시지를 특정 파티션에 배치한다.
+같은 키를 가진 메시지들은 항상 같은 파티션에 배치된다. 그리고 메시징 시스템은 같은 파트션이 내의 모든 메세제들의 전달 순서만 보장하면 된다.
+이러한 순서 보장을 위해 우리는 consumer 그룹 내에서 각 파트션이 하나의 컨슈머 인스턴스로 구성되도록 설정한다.
+파티션의 개수를 증가함으로써 consumer 인스턴스 개수도 증가 가능하며 이렇게 함으로써 전달 순서와 함께 해당 consumer의 성능도 증대된다.
+
+!()[https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_07_10.png]
+
+Spring Cloud Stream에서는 이를 publisher와 consumer 양쪽 모두에서 구성해야 한다. 발행자 측에서는 키와 파티션의 수를 지정해야 한다.
+예를 들어, product-composite 서비스의 경우 다음과 같다.
+
+```yaml
+spring.cloud.stream.bindings.products-out-0.producer:
+  partition-key-expression: headers['partitionKey']
+  partition-count: 2
+```
+
+이 설정은 키가 partitionKey라는 이름의 메시지 헤더에서 가져와지고 두 개의 파티션을 사용하게 됨을 의미한다.
+각 소비자는 메시지를 소비하려는 파티션을 지정할 수 있다. 예를 들어, 상품 마이크로서비스의 경우 다음과 같다.
+
+```yaml
+spring.cloud.stream.bindings.messageProcessor-in-0:
+  destination: products
+  group: productsGroup
+  consumer:
+    partitioned: true
+    instance-index: 0
+```
+
+이 설정(instance-index)은 이 소비자가 0번 파티션, 즉 첫 번째 파티션에서만 메시지를 소비하도록 Spring Cloud Stream에 지시한다.
+
+#### *토픽과 이벤트 정의*
+메시징 시스템은 일반적으로 헤더와 본문으로 구성된 메시지를 처리한다.
+이벤트는 발생한 사건을 설명하는 메시지다. 이벤트의 경우, 메시지 본문은 이벤트 유형, 이벤트 데이터 및 이벤트 발생 시각을 설명하는 데 사용된다.
+
+#### *Gradle 빌드 파일 변경*
+
+#### *core 서비스에서의 이벤트 소비*
+애플리케이션에 이러한 변경을 적용하기 위해 다음 단계를 수행해야 한다:  
+
+> - 핵심 서비스의 토픽에 게시된 이벤트를 소비하는 메시지 프로세서 선언: 이 프로세서는 특정 토픽에서 발행된 메시지를 소비하고 해당 메시지에 따라 적절한 작업을 수행한다.
+> - 서비스 구현체가 반응형 영속성 계층을 사용하도록 변경: 기존의 동기식 데이터 처리 방식 대신, 비동기식 및 반응형 데이터 처리를 지원하는 영속성 계층을 사용하도록 코드를 수정한다.
+> - 이벤트 소비에 필요한 설정 추가: 애플리케이션 설정(예: application.properties 또는 application.yml 파일)에서, 메시징 시스템과의 연결 정보, 구독할 토픽 이름 등 필요한 설정을 추가한다.
+> - 이벤트의 비동기 처리를 테스트할 수 있도록 테스트 변경: 기존의 동기식 로직 테스트 대신, 비동기적으로 처리되는 이벤트와 그 결과를 검증하는 테스트 코드가 필요한다.
+
+이러한 모든 변경은 애플리케이션의 확장성과 유연성을 높이며, 시스템 전체의 병목 현상을 줄여준다.
+
+- 메세지 프로세서 정의
+```java
+@Configuration
+public class MessageProcessorConfig {
+  private final ProductService productService;
+  @Autowired
+  public MessageProcessorConfig(ProductService productService) 
+  {
+    this.productService = productService;
+  }
+  @Bean
+  public Consumer<Event<Integer,Product>> messageProcessor() {
+    ...
+```
+
+Consumer 구현
+```java
+return event -> {
+  switch (event.getEventType()) {
+    case CREATE:
+      Product product = event.getData();
+      productService.createProduct(product).block();
+      break;
+    case DELETE:
+      int productId = event.getKey();
+      productService.deleteProduct(productId).block();
+      break;
+    default:
+      String errorMessage = "Incorrect event type: " + 
+        event.getEventType() + 
+        ", expected a CREATE or DELETE event";
+      throw new EventProcessingException(errorMessage);
+  }
+};
+```
+
+productService 빈에서 발생하는 예외를 메시징 시스템으로 전파할 수 있도록 보장하기 위해, productService 빈에서 받은 응답에 block() 메서드를 호출한다.
+이는 메시지 프로세서가 기본 데이터베이스에서의 생성 또는 삭제를 완료하기까지 productService 빈을 기다리도록 보장한다.
+block() 메서드를 호출하지 않으면 예외를 전파할 수 없고, 메시징 시스템은 실패한 시도를 다시 큐에 넣거나 가능하면 메시지를 dead-letter 큐로 이동할 수 없다. 대신, 메시지는 조용히 드롭된다.
+따라서 반응형 프로그래밍과 함께 사용되는 경우에도 서비스 간의 통신이나 데이터 처리 작업에서 오류가 발생한 경우 이러한 오류 상황을 적절히 처리하고 전파하는 것이 중요하다.
+이렇게 하면 문제가 발생한 경우 시스템이 적절한 대응을 할 수 있으며, 필요한 경우 해당 작업을 재실행하거나 다른 대책을 마련할 수 있다.
+
+***
+일반적으로 block() 메서드를 호출하는 것은 성능 및 확장성 측면에서 나쁜 관행으로 간주된다.
+그러나 이 경우에는 위에서 설명한 것처럼 병렬로 들어오는 몇 가지 메시지만 처리하게 되는데, 파티션 당 하나씩이다.
+이는 동시에 차단되는 스레드가 몇 개뿐이므로 성능이나 확장성에 부정적인 영향을 미치지 않는다.
+그러나 가능한 한 block() 메서드의 사용을 피하고, 대신 비동기 프로그래밍 기법과 반응형 프로그래밍 모델을 사용하는 것이 좋다.
+이런 접근 방식은 시스템의 전체적인 처리 용량을 늘리고, 다양한 작업들 사이에서 자원을 효율적으로 공유할 수 있도록 도와준다.
+block() 호출의 필요성이 생기면 그것은 종종 설계상의 문제를 나타내므로, 가능하다면 해당 코드 부분을 리팩토링하여 완전히 비동기화하는 것이 좋다.
+***
+
+
+### 소비(consuming) 이벤트를 위한 설정
+
+1. RabbitMQ가 기본 메세징 시스템이며 기본 Content type은 JSON이다.
+```yaml
+spring.cloud.stream:
+  defaultBinder: rabbit
+  default.contentType: application/json
+```
+
+2. 다음으로, 메시지 프로세서의 입력을 특정 토픽 이름에 바인딩한다.
+```yaml
+spring.cloud.stream:
+  bindings.messageProcessor-in-0:
+    destination: products
+```
+
+3. 마지막으로 Kafka와 RabbitMQ의 연결정보를 설정한다.
+```yaml
+spring.cloud.stream.kafka.binder:
+  brokers: 127.0.0.1
+  defaultBrokerPort: 9092
+spring.rabbitmq:
+  host: 127.0.0.1
+  port: 5672
+  username: guest
+  password: guest
+---
+spring.config.activate.on-profile: docker
+spring.rabbitmq.host: rabbitmq
+spring.cloud.stream.kafka.binder.brokers: kafka
+```
+
+### 테스트 코드 변경
+
+핵심 서비스가 이제 엔티티를 생성하고 삭제하기 위한 이벤트를 받게 되므로, 테스트는 이전 장에서처럼 REST API를 호출하는 대신 이벤트를 보내도록 업데이트해야 한다.
+테스트 클래스에서 메시지 프로세서를 호출할 수 있도록, 메시지 프로세서 빈을 멤버 변수에 주입한다.
+
+```java
+@SpringBootTest
+class ProductServiceApplicationTests {
+  @Autowired
+  @Qualifier("messageProcessor")
+  private Consumer<Event<Integer, Product>> messageProcessor;
+```
+
+위 코드에서는 Consumer 함수를 주입하는 것뿐만 아니라 @Qualifier 어노테이션을 사용하여 messageProcessor라는 이름을 가진 Consumer 함수를 주입하려고 지정하는 것을 볼 수 있다.
+Consumer 함수 인터페이스 선언에서 메시지 프로세서를 호출하기 위해 accept() 메서드를 사용하는 것에 주목하라.
+이는 테스트에서 메시징 시스템을 건너뛰고 메시지 프로세서를 직접 호출한다는 것을 의미한다.
+
+```java
+  private void sendCreateProductEvent(int productId) {
+    Product product = new Product(productId, "Name " + productId, productId, "SA");
+    Event<Integer, Product> event = new Event(CREATE, productId, product);
+    messageProcessor.accept(event);
+  }
+  private void sendDeleteProductEvent(int productId) {
+    Event<Integer, Product> event = new Event(DELETE, productId, null);
+    messageProcessor.accept(event);
+  }
+```
+
+
+### 이벤트 전파
+
+1. HTTP 요청의 본문을 기반으로 이벤트 객체를 생성한다.
+2. 이벤트 객체가 페이로드로 사용되고, 이벤트 객체의 키 필드가 헤더의 파티션 키로 사용되는 메시지 객체를 생성한다.
+3. 도우미 클래스 StreamBridge를 사용하여 원하는 주제에 이벤트를 게시한다.
+
+```java
+  @Override
+  public Mono<Product> createProduct(Product body) {
+    return Mono.fromCallable(() -> {
+      sendMessage("products-out-0", 
+        new Event(CREATE, body.getProductId(), body));
+      return body;
+    }).subscribeOn(publishEventScheduler);
+  }
+  private void sendMessage(String bindingName, Event event) {
+    Message message = MessageBuilder.withPayload(event)
+      .setHeader("partitionKey", event.getKey())
+      .build();
+    streamBridge.send(bindingName, message);
+  }
+```
+
+### 이벤트 전파(publish)를 위한 설정
+
+> - 통합 계층은 도우미 메서드인 sendMessage()를 사용하여 ProductService 인터페이스의 createProduct() 메서드를 구현한다. 이 helper 메서드는 출력 바인딩의 이름과 이벤트 객체를 받는다. 아래의 설정에서 바인딩 이름 'products-out-0'은 제품 서비스의 주제에 바인딩된다.
+> - sendMessage()가 블로킹 코드를 사용하기 때문에, streamBridge를 호출할 때 전용 스케줄러인 'publishEventScheduler'가 제공하는 스레드에서 실행된다. 이는 review 마이크로서비스에서 블로킹 JPA 코드를 처리하는 방식과 같다.
+> - helper 메서드인 sendMessage()는 Message 객체를 생성하고, 위에서 설명한 대로 페이로드와 partitionKey 헤더를 설정한다. 마지막으로, 이것은 streamBridge 객체를 사용하여 이벤트를 메시징 시스템에 보내고, 그것은 설정에서 정의된 topic에 게시할 것이다.
+
+```yaml
+spring.cloud.stream:
+  bindings:
+    products-out-0:
+      destination: products
+    recommendations-out-0:
+      destination: recommendations
+    reviews-out-0:
+      destination: reviews
+```
+
+파티션을 사용한다면 다음과 같이 파티션 키와 사용할 파티션의 수를 지정한다.
+
+```yaml
+spring.cloud.stream.bindings.products-out-0.producer:
+  partition-key-expression: headers['partitionKey']
+  partition-count: 2
+```
+
+
+## 수동 테스트
+
+- RabbitMQ 사용 (파티션 없음)
+- RabbitMQ 사용 (2 파티션)
+- Kafka 사용 (2 파티션)
+
+```shell
+./gradlew build && docker-compose build && docker-compose up -d
+curl -s localhost:8080/actuator/health | jq -r .status
+```
+
+### composite product 생성
+```shell
+body='{"productId":1,"name":"product name C","weight":300, "recommendations":[
+{"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},
+ {"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},
+ {"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}
+], "reviews":[
+ {"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},
+ {"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},
+ {"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}
+]}'
+curl -X POST localhost:8080/product-composite -H "Content-Type: application/json" --data "$body"
+```
+
+### RabbitMQ 확인
+
+http://localhost:15672/#/queues 접속 (admin/admin)
+
+각 주제마다 감사 그룹(auditGroup)을 위한 큐, 해당 핵심 마이크로서비스에서 사용하는 컨슈머 그룹을 위한 큐, 그리고 데드레터(dead-letter) 큐가 있는 것을 볼 수 있다. 또한 예상대로 감사 그룹 큐에 메시지가 포함되어 있는 것도 확인할 수 있다.
+이러한 구성은 일반적으로 메시징 시스템에서 사용되는 패턴이다. 각 마이크로서비스는 자체적인 컨슈머 그룹을 가지며, 해당 컨슈머 그룹은 특정 주제를 구독하여 메시지를 처리한다.
+동시에 감사(audit)나 모니터링 등의 목적으로 별도의 감사 그룹이나 대기열을 사용하는 것도 일반적이다.
+데드레터 큐는 일부 메시징 시스템에서 재처리할 수 없거나 처리 중에 오류가 발생한 메시지를 보관하기 위해 사용된다. 이러한 메시지들은 추후 분석하거나 문제 해결을 위해 검토될 수 있다.
+
+![](./images/img.png)
+
+products.auditGroup 큐를 선택하고, 메시지를 확인한다. 이 큐는 감사 그룹을 위한 것이므로, 각 마이크로서비스에서 발생한 이벤트를 포함한다.
+이벤트의 페이로드는 JSON 형식이며, 이벤트의 키는 헤더의 partitionKey 키에 저장된다.
+
+#### 저장된 product-composite 정보 조회
+```shell
+curl -s localhost:8080/product-composite/1
+```
+
+#### product-composite 삭제
+```shell
+curl -X DELETE localhost:8080/product-composite/1
+```
+
+#### docker compose down
+```shell
+docker-compose down
+```
+
+### RabbitMQ with partitions
+
+토픽 당 두개의 파티션을 할당한 RabbitMQ docker compose 파일 일부
+```yaml
+  product-p1:
+    build: microservices/product-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,streaming_partitioned,streaming_instance_1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+```
+
+> - 첫 번째 product 인스턴스에 대해 사용했던 것과 동일한 소스 코드와 Dockerfile을 사용하지만, 다르게 구성한다.
+> - 모든 마이크로서비스 인스턴스가 파티션을 사용할 것임을 인지하게 하기 위해, 환경 변수 SPRING_PROFILES_ACTIVE에 Spring 프로필 streaming_partitioned를 추가했다.
+> - 두 개의 product 인스턴스를 다른 Spring 프로필을 사용하여 다른 파티션에 할당한다. Spring 프로필 streaming_instance_0은 첫 번째 product 인스턴스에서 사용되며, streaming_instance_1은 두 번째 인스턴스인 product-p1에서 사용된다.
+> - ***두 번째 제품 인스턴스는 비동기 이벤트만 처리할 것이다. API 호출에 응답하지 않는다. 그것은 다른 이름인 product-p1(그것의 DNS 이름으로도 사용됨)을 가지고 있으므로, http://product:8080으로 시작하는 URL에 대한 호출에 응답하지 않는다.***
+
+#### 서비스 실행 with partitions
+```shell
+docker-compose build && docker-compose -f docker-compose-partitions.yml up -d
+```
+
+product 정보를 생성하면 아래와 같은 큐 상태를 볼 수 있다.
+
+![](./images/img_2.png)
+
+product를 생성하면 auditGroup에 번갈아가며 큐가 추가되는 것을 확인할 수 있다.
+
+```shell
+docker-compose down
+unset COMPOSE_FILE
+```
+
+### Kafka with two partitions per topic
+
+메세지 시스템을 RabbitMQ에서 Apache Kafka로 변경한다.
+이는 단순히 spring.cloud.stream.defaultBinder의 값을 kafka로 변경하면 된다.
+docker-compose-kafka.yml 파일을 사용하여 Kafka와 Zookeeper를 설정한다.
+
+```shell
+
+```yaml
+kafka:
+  image: confluentinc/cp-kafka:7.3.1
+  restart: always
+  mem_limit: 1024m
+  ports:
+    - "9092:9092"
+  environment:
+    - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+    - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+    - KAFKA_BROKER_ID=1
+    - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+  depends_on:
+    - zookeeper
+zookeeper:
+  image: confluentinc/cp-zookeeper:7.3.1
+  restart: always
+  mem_limit: 512m
+  ports:
+    - "2181:2181"
+  environment:
+    - ZOOKEEPER_CLIENT_PORT=2181
+```
+
+
+#### 실행
+```shell
+docker-compose build && docker-compose -f docker-compose-kafka.yml up -d
+```
+
+#### 테스트
+이전과 마찬가지로 product를 2건 생성한다.
+Kafka는 그래픽 UI가 없으므로 이하 커맨드를 실행하여 리스트를 확인한다.
+
+```shell
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+```
+
+![](./images/img_3.png)
+
+> - error로 시작하는 주제들은 데드레터 큐에 해당하는 토픽들이다.
+> - RabbitMQ의 경우처럼 auditGroup 그룹을 찾아볼 수 없다. Kafka에서는 소비자가 이벤트를 처리한 후에도 이벤트가 토픽에 보존되므로, 추가적인 auditGroup 그룹이 필요하지 않다.
+
+특정 토픽의 파티션을 보고 싶다면, 예를 들어 products 토픽의 파티션을 보려면 다음과 같이 실행한다.
+
+```shell
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic products
+```
+
+![](./images/img_4.png)
+
+특정 파티션의 모든 메세지를 보고 싶다면, 예를 들어 products 토픽의 1번 파티션의 모든 메세지를 보려면 다음과 같이 실행한다.
+
+```shell
+docker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic products --from-beginning --timeout-ms 1000 --partition 1
+```
+
+![](./images/img_5.png)
+
+출력은 이벤트 내용과 함께 타임아웃 예외로 끝난다. 왜냐하면 커맨드에 대한 타임아웃을 1000ms로 지정하여 명령을 중지하기 때문.
+
+```shell
+docker-compose down
+unset COMPOSE_FILE
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
