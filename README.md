@@ -1055,7 +1055,7 @@ products.auditGroup 큐를 선택하고, 메시지를 확인한다. 이 큐는 �
 
 #### 저장된 product-composite 정보 조회
 ```shell
-curl -s localhost:8080/product-composite/1
+curl -s localhost:8080/product-composite/1 | jq
 ```
 
 #### product-composite 삭제
@@ -1178,6 +1178,365 @@ docker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:90
 docker-compose down
 unset COMPOSE_FILE
 ```
+
+---
+
+## Spring Cloud
+
+> - Service discovery
+> - Edge server
+> - Centralized configuration
+> - Circuit breaker
+> - Distributed tracing
+
+
+### Spring Cloud의 변천
+
+> - Netflix Eureka, a discovery server
+> - Netflix Ribbon, a client-side load balancer
+> - Netflix Zuul, an edge server
+> - Netflix Hystrix, a circuit breaker
+
+이후 추가 지원 기능
+
+> - HashiCorp Consul과 Apache Zookeeper를 기반으로 한 서비스 디스커버리와 중앙집중식 구성
+> - Spring Cloud Stream을 사용한 이벤트 주도형 마이크로서비스
+> - Microsoft Azure, Amazon Web Services, Google Cloud Platform 등의 클라우드 제공업체
+
+See: https://spring.io/projects/spring-cloud
+
+Current component|Replaced by
+|-------------|-----------|
+Netflix Hystrix|Resilience4j
+Netflix Hystrix Dashboard/Netflix Turbine|Micrometer and monitoring system
+Netflix Ribbon|Spring Cloud LoadBalancer
+Netflix Zuul|Spring Cloud Gateway
+
+
+#### ***본 프로젝트에서 사용된 디자인 패턴과 소프트웨어***
+Design pattern|Software component
+|-------------|-----------|
+Service discovery|Netflix Eureka and Spring Cloud LoadBalancer
+Edge server|Spring Cloud Gateway and Spring Security OAuth
+Centralized configuration|Spring Cloud Configuration Server
+Circuit breaker|Resilience4j
+Distributed tracing|Micrometer Tracing and Zipkin
+
+
+#### - Netflix Eureka for Service discovery
+
+
+#### - Spring Cloud Gateway as an edge server
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_08_02.png)
+
+#### - Spring Cloud Config for centralized configuration
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_08_03.png)
+
+> - 마이크로서비스가 시작될 때, 그들은 구성 서버에게 자신의 구성을 요청한다.
+> - 구성 서버는 이 경우 Git 저장소에서 구성을 가져온다.
+> - 선택적으로, Git 저장소는 Git 커밋이 Git 저장소에 푸시될 때 구성 서버에 알림을 보내도록 설정할 수 있다.
+> - 구성 서버는 Spring Cloud Bus를 사용하여 변경 이벤트를 발행한다. 변경에 영향을 받는 마이크로서비스들은 반응하고 업데이트된 구성을 구성 서버에서 검색한다.
+
+
+#### - Resilience4j for improved resilience
+
+> - Circuit breaker는 원격 서비스가 응답을 중지하면 실패 반응의 연쇄를 방지하는 데 사용된다.
+> - Rate limiter는 지정된 시간 동안 서비스에 대한 요청 수를 제한하는 데 사용한다.
+> - Bulkhead는 서비스에 대한 동시 요청 수를 제한하는 데 사용된다.
+> - Retries는 가끔 발생할 수 있는 임의의 오류를 처리하는 데 사용된다.
+> - Time limiter는 느리거나 응답하지 않는 서비스로부터의 응답을 너무 오래 기다리지 않도록 하는데 사용된다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_08_04.png)
+
+1. 서킷 브레이커는 Closed 상태로 시작하여 요청을 처리할 수 있다.
+2. 요청이 성공적으로 처리되는 한, 그것은 Closed 상태를 유지한다.
+3. 만약 실패가 발생하기 시작하면, 카운터가 증가하기 시작한다.
+4. 특정 시간 동안 실패 횟수의 임계값에 도달하면 서킷 브레이커는 트립, 즉 Open 상태로 전환되어 추가 요청을 처리하지 않는다. 실패의 임계값과 시간 기간 모두 설정 가능하다.
+5. 대신, 요청은 빠르게 실패하며, 즉시 예외와 함께 반환된다.
+6. 설정 가능한 일정 시간 후에 서킷 브레이커는 Half Open 상태로 들어가고 하나의 요청을 프로브(probe)로 통과시켜 실패 문제가 해결되었는지 확인한다.
+7. 프로브 요청이 실패하면 서킷 브레이커는 다시 Open 상태로 돌아간다.
+8. 프로브 요청이 성공하면 서킷 브레이커는 초기 Closed 상태로 돌아가서 새로운 요청을 처리할 수 있게 된다.
+
+#### - Micrometer Tracing and Zipkin for distributed tracing
+
+마이크로서비스의 협업 시스템 풍경 같은 분산 시스템에서 무슨 일이 일어나고 있는지 이해하려면, 시스템 풍경에 대한 외부 호출을 처리할 때 마이크로서비스 간에 요청과 메시지가 어떻게 흐르는지 추적하고 시각화할 수 있어야 한다.
+Micrometer Tracing은 동일한 처리 흐름의 일부인 요청과 메시지/이벤트를 공통 상관 ID로 표시할 수 있다.
+
+
+---
+## 서비스 디스커버리 추가 Using Netflix Eureka
+
+마이크로서비스를 트래킹 할 때 생각해볼 것
+> - 새로운 인스턴스는 언제든지 시작될 수 있다.
+> - 기존의 인스턴스는 언제든지 응답을 중단하고 결국에는 충돌할 수 있다.
+> - 실패한 인스턴스 중 일부는 잠시 후에 정상화되어 다시 트래픽을 받아야 하며, 다른 일부는 그렇지 않고 서비스 레지스트리에서 제거되어야 한다.
+> - 일부 마이크로서비스 인스턴스는 시작하는 데 시간이 걸릴 수 있다. 즉, HTTP 요청을 받을 수 있다고 해서 트래픽이 그들로 라우팅되어야 한다는 것은 아니다.
+> - 의도하지 않은 네트워크 분할 및 기타 네트워크 관련 오류가 언제든지 발생할 수 있다.
+
+#### Service discovery with Netflix Eureka in Spring Cloud
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_09_04.png)
+
+> - 마이크로서비스 인스턴스가 시작될 때마다 - 예를 들어, Review 서비스 - 그것은 자신을 Eureka 서버 중 하나에 등록한다.
+> - 주기적으로, 각 마이크로서비스 인스턴스는 하트비트 메시지를 Eureka 서버에 보내, 마이크로서비스 인스턴스가 정상적으로 작동하고 요청을 받을 준비가 되었다고 알린다.
+> - 클라이언트 - 예를 들어, Product Composite 서비스 - 는 사용 가능한 서비스에 대한 정보를 Eureka 서비스에게 정기적으로 요청하는 클라이언트 라이브러리를 사용한다.
+> - 클라이언트가 다른 마이크로서비스에 요청을 보내야 할 때, 그것은 이미 클라이언트 라이브러리에서 사용 가능한 인스턴스 리스트를 가지고 있으며 디스커버리 서버에게 묻지 않고 그 중 하나를 선택할 수 있다. 일반적으로, 사용 가능한 인스턴스는 라운드 로빈 방식으로 선택된다. 즉, 첫 번째 것이 다시 호출되기 전에 차례대로 호출된다.
+
+## Setting up a Netflix Eureka server
+
+1. @EnableEurekaServer 어노테이션을 어플리케이션 클래스에 추가한다.
+2. 기본 8080 포트 대신 유레카 포트를 8761로 설정한다.
+3. docker compose 파일에 이하의 설정을 추가한다.
+
+```yaml
+eureka:
+  build: spring-cloud/eureka-server
+  mem_limit: 512m
+  ports:
+    - "8761:8761"
+```
+
+## 마이크로서비스를 Netflix Eureka 서버에 연결하기
+
+1. spring-cloud-starter-netflix-eureka-client 의존성 추가
+```groovy
+Implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+```
+
+2. 각 유닛 테스트를 진행할 때 유레카 서버에 의존해서는 안된다. 모든 스프링부트 테스트에서 넷플릭스 유레카를 비활성화 할 것이다. eureka.client.enabled 프로퍼티를 설정함으로써 가능하다.
+```java
+@SpringBootTest(webEnvironment=RANDOM_PORT, properties = {"eureka.client.enabled=false"})
+```
+
+3. 이외에 application.yml 파일의 설정 변경을 참고하는데 주목해야 할 부분은 spring.application.name 프로퍼티이다. 각 마이크로서비스의 버추얼 호스트네임을 부여하는데 사용되는데 이는 유레카 서비스가 각 마이크로서비스를 식별하는 이름으로 사용된다. 유레카 클라이언트는 이 버추얼 호스트네임을 URL로써 마이크로서비스로의 http 호출에 사용될 것이다.
+
+
+### product-composite 마이크로서비스에서 Eureka 서버를 통해 사용 가능한 마이크로서비스 인스턴스를 조회할 수 있도록 하기 위해서는 다음과 같은 작업을 수행해야 한다.
+
+1. 메인 애플리케이션 클래스인 ProductCompositeServiceApplication에 로드 밸런서를 인식하는 WebClient 빌더를 생성하는 Spring bean을 추가한다.
+
+```java
+@Bean
+@LoadBalanced
+public WebClient.Builder loadBalancedWebClientBuilder() {
+    return WebClient.builder();
+}
+```
+
+2. ProductCompositeIntegration 클래스에서 WebClient.Builder를 주입받는다. 한번 WebClient가 이렇게 빌드되면 싱글턴 인스턴스로서 변하지 않고(immutable) 재사용 가능하다.
+
+```java
+private WebClient webClient;
+@Autowired
+public ProductCompositeIntegration(
+  WebClient.Builder webClientBuilder, 
+  ...
+) {
+  this.webClient = webClientBuilder.build();
+  ...
+}
+```
+
+3. 이하와 같은 하드코딩 된 URL을 사용하지 않고도 유레카 서버를 통해 마이크로서비스 인스턴스를 조회할 수 있다.
+
+```yaml
+app:
+  product-service:
+    host: localhost
+    port: 7001
+  recommendation-service:
+    host: localhost
+    port: 7002
+  review-service:
+    host: localhost
+    port: 7003
+```
+
+4. 하드코딩된 설정을 처리한 통합 클래스인 ProductCompositeIntegration의 해당 코드는 간소화되고, 핵심 마이크로서비스의 API에 대한 기본 URL 선언으로 대체된다.
+
+```java
+private static final String PRODUCT_SERVICE_URL = "http://product";
+private static final String RECOMMENDATION_SERVICE_URL = "http://recommendation";
+private static final String REVIEW_SERVICE_URL = "http://review";
+```
+
+앞서 언급된 URL들의 호스트 이름은 실제 DNS 이름이 아니다. 대신, 이들은 마이크로서비스가 Eureka 서버에 자신을 등록할 때 사용하는 가상의 호스트 이름, 즉 spring.application.name 속성의 값이다.
+
+
+> Netflix Eureka는 다양한 사용 사례에 대해 설정할 수 있는 매우 구성 가능한 디스커버리 서버이며, 강력하고 탄력적이며 장애 허용성 있는 런타임 특성을 제공한다. 이러한 유연성과 견고함의 단점은 거의 압도적인 수의 구성 옵션이 있다는 것이다.
+> 다행히도 Netflix Eureka는 대부분의 구성 가능한 파라미터에 대해 좋은 기본값을 제공합니다 - 적어도 운영 환경에서 사용할 때는 그렇다.
+> 개발 중에 Netflix Eureka를 사용하는 경우, 기본값은 긴 시작 시간을 초래한다. 예를 들어, 클라이언트가 Eureka 서버에 등록된 마이크로서비스 인스턴스에 처음으로 성공적인 호출을 하는 데 오랜 시간이 걸릴 수 있다.
+> 기본 구성 값으로 사용할 때 최대 2분까지의 대기 시간을 경험할 수 있다. 이 대기 시간은 Eureka 서비스와 마이크로서비스가 시작하는 데 걸리는 시간에 추가된다. 이 대기 시간의 원인은 관련 프로세스들이 등록 정보를 상호 간에 동기화해야 하기 때문이다.
+> 마이크로서비스 인스턴트들은 Eureka 서버에 등록해야 하고, 클라이언트는 Eureka 서버에서 정보를 수집해야 한다. 이 통신은 주로 심장 박동(heartbeats) 기반으로 이루어지며, 기본적으로 30초마다 일어난다. 업데이트 전파를 지연시키는 몇 가지 캐시도 관여하게 된다.
+> 우리는 개발 중에 유용한 이 대기 시간을 최소화하는 구성을 사용할 것입니다.  
+> ***운영 환경에서는 기본값부터 시작하여 사용해야 한다!***
+
+#### 유레커 설정 파라미터
+
+> - Eureka 서버에 대한 매개변수, 접두사는 eureka.server.
+> - Eureka 서버와 통신하려는 클라이언트를 위한 Eureka 클라이언트의 매개변수, 접두사는 eureka.client.
+> - Eureka 서버에 자신을 등록하려는 마이크로서비스 인스턴스를 위한 Eureka 인스턴스의 매개변수, 접두사는 eureka.instance.
+
+
+#### 유레카 서버의 설정
+
+```yaml
+server:
+  port: 8761
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    registerWithEureka: false
+    fetchRegistry: false
+    serviceUrl:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+ 
+  server:
+    waitTimeInMsWhenSyncEmpty: 0
+    response-cache-update-interval-ms: 5000
+```
+
+#### 유레카 서버에 접속할 클라이언트 설정
+
+```yaml
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:8761/eureka/
+    initialInstanceInfoReplicationIntervalSeconds: 5
+    registryFetchIntervalSeconds: 5
+  instance:
+    leaseRenewalIntervalInSeconds: 5
+    leaseExpirationDurationInSeconds: 5
+---
+spring.config.activate.on-profile: docker
+eureka.client.serviceUrl.defaultZone: http://eureka:8761/eureka/
+```
+
+eureka.client.serviceUrl.defaultZone 프로퍼티는 유레카 서버를 찾는데 사용된다. 도커없이 로컬에서 실행시는 localhost로, 도커에서 실행시는 호스트네임 eureka로 설정한다.
+나머지 매개변수들은 시작 시간을 최소화하고 중지된 마이크로서비스 인스턴스의 등록 취소 시간을 줄이는 데 사용된다.
+
+
+#### 디스커버리 서비스 테스트
+
+```shell
+./gradlew build && docker-compose build
+./test-em-all.bash start
+```
+
+#### Scaling up
+
+1. 두개의 추가 리뷰 인스턴스를 시작한다.
+```shell
+docker-compose up -d --scale review=3
+```
+
+2. http://localhost:8761/ 유레카 서버를 열어 review 인스턴스가 3개임을 확인한다.
+
+3. review 마이크로서비스가 시작했음을 알 수 있는 또다른 방법은 이하의 커맨드를 입력하는 것이다.
+```shell
+docker-compose logs review | grep Started 
+```
+
+4. 또한 유레카 서비스의 REST API를 이용하여 인스턴스 ID를 확인할 수 있다.
+```shell
+curl -H "accept:application/json" localhost:8761/eureka/apps -s | jq -r .applications.application[].instance[].instanceId
+```
+
+5. test-em-all.bash 스크립트를 참조하면 유레카 REST API에 전달하는 새 테스트 코드를 확인할 수 있다.
+```shell
+# Verify access to Eureka and that all four microservices are # registered in Eureka
+assertCurl 200 "curl -H "accept:application/json" $HOST:8761/eureka/apps -s"
+assertEqual 4 $(echo $RESPONSE | jq ".applications.application | length")
+```
+
+6. 모든 인스턴스가 올라간 것을 확인했으면, http 리퀘스트를 보내 서비스 어드레스를 확인하는 것으로 클라이언트 사이드의 로드밸런서를 테스트 해보자.
+   라운드-로빈 방식으로 하나씩 돌아가며 review 서비스를 호출하는 것을 확인할 수 있다.
+```shell
+curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+```
+
+7. 이하의 커맨드로 review 인스턴스의 로그를 확인할 수 있다.
+```shell
+docker-compose logs review | grep "Response size"
+```
+
+#### Scaling down
+
+1. 예상치 못하게 하나의 인스턴스가 중단된 것을 이하의 커맨드로 시뮬레이션 할 수 있다.
+```shell
+docker-compose up -d --scale review=2
+```
+
+2. 리뷰 인스턴스가 종료된 후에는 API 호출이 실패할 수 있는 짧은 시간이 있다. 이는 사라진 인스턴스에 대한 정보가 클라이언트인 product-composite 서비스로 전파되는 데 걸리는 시간 때문이다.
+이 시간 동안, 클라이언트 측 로드 밸런서는 더 이상 존재하지 않는 인스턴스를 선택할 수 있다. 이러한 현상을 방지하기 위해, 타임아웃과 재시도와 같은 복원력 메커니즘을 사용할 수 있다.
+후에 'Resilience4j를 사용하여 복원력 향상'에서 이를 어떻게 적용하는지 알아볼 것이다. 지금은 curl 명령에 타임아웃을 지정한다. -m 2 옵션을 사용하여 응답을 기다리는 시간이 2초를 초과하지 않도록 한다.
+```shell
+curl localhost:8080/product-composite/1 -m 2
+```
+
+
+### 유레카 서버 파괴적 테스트
+
+클라이언트가 Eureka 서버가 중지되기 전에 사용 가능한 마이크로서비스 인스턴스에 대한 정보를 읽어온다면, 클라이언트는 문제없이 작동할 것이다. 마이크로서비스는 그 정보를 로컬에 캐시하기 때문이다.
+그러나, 새로 생성된 인스턴스의 정보는 클라이언트에게 제공되지 않을 것이고, 실행 중인 인스턴스가 종료된 경우에도 알림을 받지 못할 것이다.
+따라서 더 이상 실행되지 않는 인스턴스로의 호출은 실패를 초래할 것이다. 테스트 해보자.
+
+
+#### 유레카 서버 중단
+
+1. 유레카 서버를 중지하고 review 서비스는 두 개로 남겨둔다.
+```shell
+docker-compose up -d --scale review=2 --scale eureka=0
+```
+
+2. 몇 번 http 호출을 하여 review 서비스에 대한 응답 확인을 한다.
+```shell
+curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+```
+
+#### 새로운 product 서비스 인스턴스 시작
+
+1. 새로운 product 서비스 인스턴스 생성
+```shell
+docker-compose up -d --scale review=2 --scale eureka=0 --scale product=2
+```
+
+2. 여러번 http 호출을 하면서 product 서비스의 IP를 확인한다.
+```shell
+curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.pro
+```
+
+새로운 인스턴스의 정보를 유레카 서버로 전달받지 못했기 때문에 하나의 IP만 응답할 것이다.
+
+
+#### 유레카 서버 재기동
+
+1. 유레카 서버를 재기동한다. review 서비스는 1개로 줄인다.
+```shell
+docker-compose up -d --scale review=1 --scale eureka=1 --scale product=2
+```
+
+2. 이하 요청을 여러번 보내면서 product와 review 서비스의 IP 주소를 확인한다.
+```shell
+curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses
+```
+
+> - 모든 요청이 남아 있는 review 인스턴스로 호출되는 것은 클라이언트가 두 번째 리뷰 인스턴스가 사라졌음을 감지했음을 보여준다.
+> - product 서비스에 대한 호출은 두 개의 제품 인스턴스에 대해 로드 밸런싱되며, 이는 클라이언트가 두 개의 제품 인스턴스가 사용 가능함을 감지했음을 보여준다.
+
+3. 서비스 셧다운
+```shell
+docker-compose down
+```
+
+
+
+
+
+
 
 
 
