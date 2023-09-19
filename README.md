@@ -1533,19 +1533,324 @@ docker-compose down
 ```
 
 
+## Using Spring Cloud Gateway to Hide Microservices behind an Edge Server
+
+Spring Cloud Gateway를 엣지 서버로 사용하여 마이크로서비스 기반 시스템 랜드스케이프에서 어떤 API가 노출되는지 제어하는 방법을 배울 것이다.
+공개 API를 가진 마이크로서비스가 엣지 서버를 통해 외부에서 접근 가능하게 되는 방법과, 비공개 API를 가진 마이크로서비스가 마이크로서비스 랜드스케이프 내부에서만 접근 가능하게 되는 방법을 살펴볼 것이다.  
+시스템 랜드스케이프에서 이것은 product-composite 서비스와 디스커버리 서버인 Netflix Eureka가 ***엣지 서버를 통해 노출될 것이라는 의미이다.***
+
+### 할 일
+> - 우리 시스템 랜드스케이프에 엣지 서버 추가하기
+> - Spring Cloud Gateway 설정, 라우팅 규칙 구성 포함
+> - 엣지 서버 테스트하기
+
+모든 요청은 엣지서버로 라우팅 될 것이다. 아래의 그림 참조.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_10_01.png)
+
+앞서 보여준 다이어그램에서 볼 수 있듯이, 외부 클라이언트는 모든 요청을 엣지 서버로 보낸다. 엣지 서버는 URL 경로를 기반으로 들어오는 요청을 라우팅할 수 있다.
+예를 들어, /product-composite/로 시작하는 URL을 가진 요청은 제품 복합 마이크로서비스로 라우팅되고, /eureka/로 시작하는 URL을 가진 요청은 Netflix Eureka 기반의 디스커버리 서버로 라우팅된다.
+
+> 디스커버리 서비스를 Netflix Eureka와 함께 작동하게 하려면 엣지 서버를 통해 노출시킬 필요가 없다. 내부 서비스는 Netflix Eureka와 직접 통신한다.
+> 이를 노출하는 이유는 웹 페이지와 API를 Netflix Eureka의 상태를 확인하고, 디스커버리 서비스에 현재 등록된 인스턴스가 어떤 것인지 확인해야 하는 운영자에게 접근 가능하게 하기 위함이다.
 
 
+product-composite와 유레카 서버를 외부로 노출시켰던 ports 설정은 엣지 서버를 도입하게 되면 더이상 필요없다.
+```yaml
+  product-composite:
+    build: microservices/product-composite-service
+    ports:
+      - "8080:8080"
+  eureka:
+    build: spring-cloud/eureka-server
+    ports:
+      - "8761:8761"
+```
 
 
+### Spring Cloud Gateway 추가
+
+1. 스프링부트 스켈레톤 프로젝트 생성
+2. spring-cloud-starter-gateway 의존성 추가
+3. 유레카 서버에 의해 인식되기 위한 spring-cloud-starter-netflix-eureka-client 의존성 추가
+4. common 빌드 파일 settings.gradle 에 엣지 서버 프로젝트 추가
+```groovy
+include ':spring-cloud:gateway'
+```
+5. Dockerfile 추가
+6. docker-compose 파일에 엣지서버 추가
+```yaml
+gateway:
+  environment:
+    - SPRING_PROFILES_ACTIVE=docker
+  build: spring-cloud/gateway
+  mem_limit: 512m
+  ports:
+    - "8080:8080"
+```
+7. 모든 요청은 엣지 서버로부터 들어오기 때문에 composite 헬스체크 요청을 product-composite 서비스로부터 엣지 서버로 옮긴다.
+8. 라우팅 룰과 그 외 설정을 추가한다. 많은 설정이 있다.
+
+### composite 헬스 체크 추가
+
+엣지 서버를 추가하기로 했기 때문에 모든 외부 헬스체크 요청 또한 엣지 서버를 통하게 된다. 그러므로 모든 마이크로서비스의 헬스체크를 담당하는 composite 헬스체크 또한 product-composite 서비스에서 엣지 서버로 옮겨야 한다.
+
+1. HealthCheckConfiguration 클래스 추가.
+```java
+  @Bean
+  ReactiveHealthContributor healthcheckMicroservices() {
+  
+    final Map<String, ReactiveHealthIndicator> registry = new LinkedHashMap<>();
+    
+            registry.put("product",           () -> getHealth("http://product"));
+            registry.put("recommendation",    () -> getHealth("http://recommendation"));
+            registry.put("review",            () -> getHealth("http://review"));
+            registry.put("product-composite", () -> getHealth("http://product-composite"));
+    
+            return CompositeReactiveHealthContributor.fromMap(registry);
+            }
+    
+    private Mono<Health> getHealth(String baseUrl) {
+            String url = baseUrl + "/actuator/health";
+            LOG.debug("Setting up a call to the Health API on URL: {}", url);
+            return webClient.get().uri(url).retrieve().bodyToMono(String.class)
+            .map(s -> new Health.Builder().up().build())
+            .onErrorResume(ex -> Mono.just(new Health.Builder().down(ex).build()))
+            .log(LOG.getName(), FINE);
+  }
+```
+
+2. 메인클래스에는 WebClient.Builder 빈을 추가한다.
+```java
+  @Bean
+  @LoadBalanced
+  public WebClient.Builder loadBalancedWebClientBuilder() {
+    return WebClient.builder();
+  }
+```
+보이듯이 WebClient.Builder는 @LoadBalanced 어노테이션을 추가함으로써 Eureka 서버를 통해 마이크로서비스 인스턴스를 찾는 데 사용된다.
 
 
+### Spring Cloud Gateway 설정
+
+1. Spring Cloud Gateway는 Netflix Eureka를 통해 마이크로서비스를 탐색할 것이므로, 다른 서비스들과 마찬가지로 유레카 클라이언트로 설정되어야 한다.
+2. 개발용 목적으로 스프링부트 액츄에이터 설정을 추가한다.
+```yaml
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+```
+
+3. Spring Cloud Gateway의 내부 프로세스 중 관심있는 부분의 로그 메세지를 보기 위해 로그 레벨을 설정한다. 예를들어, 들어오는 요청에 대해 어디로 라우팅할 것인지를 어떻게 결정할지라든지를 보기 위해.
+```yaml
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.gateway.route.
+        RouteDefinitionRouteLocator: INFO
+    org.springframework.cloud.gateway: TRACE
+```
+
+#### 라우팅 룰
+
+라우팅 규칙 설정은 두 가지 방법으로 수행할 수 있다: 프로그래밍 방식으로 Java DSL을 사용하거나 Configuration을 통해 수행할 수 있다.
+데이터베이스와 같은 외부 저장소에 규칙이 저장되어 있거나, 예를 들어 RESTful API 또는 게이트웨이로 보내는 메시지를 통해 런타임에 제공되는 경우, Java DSL을 사용하여 프로그래밍 방식으로 라우팅 규칙을 설정하는 것이 유용할 수 있다.
+보다 정적인 사용 사례에서는, Configuration 파일인 src/main/resources/application.yml에 경로를 선언하는 것이 더 편리할 수 있다.
+라우팅 규칙을 Java 코드에서 분리하면 마이크로서비스의 새 버전을 배포하지 않고도 라우팅 규칙을 업데이트할 수 있는 가능성이 생긴다.  
+
+라우팅은 다음과 같이 정의된다.
+
+> - 들어오는 HTTP 요청의 정보를 기반으로 경로를 선택하는 **Predicates**
+> - 요청 및/또는 응답을 수정할 수 있는 **Filters**
+> - 요청을 보낼 위치를 설명하는 목적지 **URI**
+> - 경로의 이름인 **ID**
+
+#### product-composite 서비스로의 요청 라우팅 설정 예
+
+```yaml
+spring.cloud.gateway.routes:
+- id: product-composite
+  uri: lb://product-composite
+  predicates:
+  - Path=/product-composite/**
+```
+
+상기 코드의 눈 여겨볼 포인트.
+
+> - id: product-composite: 경로의 이름은 product-composite이다.
+> - uri: lb://product-composite: 만약 이 경로가 그것의 predicates에 의해 선택되면, 요청은 디스커버리 서비스인 Netflix Eureka에서 product-composite라는 이름의 서비스로 라우팅된다. lb:// 프로토콜은 Spring Cloud Gateway가 클라이언트 측 로드 밸런서를 사용하여 디스커버리 서비스에서 목적지를 찾도록 지시하는 데 사용된다.
+> - predicates: - Path=/product-composite/**는 이 경로가 어떤 요청과 일치해야 하는지 지정하는 데 사용된다. **는 경로에서 0개 이상의 요소와 매치된다. (모든 매치)
+
+또한 SwaggerUI에 요청을 라우팅하기 위해서 product-composite에 추가 라우팅을 설정한다.
+
+```yaml
+- id: product-composite-swagger-ui
+  uri: lb://product-composite
+  predicates:
+  - Path=/openapi/**
+```
+
+`/openapi/` 로 시작하는 모든 요청은 product-composite 서비스로 라우팅된다.
 
 
+> - Swagger UI가 엣지 서버 뒤에 위치할 때, 이는 올바른 서버 URL을 포함하는 API의 OpenAPI 명세를 표시해야 한다. 즉, product-composite 서비스 자체의 URL이 아닌 엣지 서버의 URL을 표시해야 한다.  
+product-composite 서비스가 OpenAPI 명세에서 올바른 서버 URL을 생성할 수 있도록 하기 위해, 다음과 같은 구성이 product-composite 서비스에 추가되었다.
+```yaml
+server.forward-headers-strategy: framework
+```
+
+> - OpenAPI의 올바른 URL 명세가 설정되었는지 보기 위해 이하 테스트가 test-em-all.bash에 추가되었다.
+```shell
+  assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/v3/api-docs"
+  assertEqual "http://$HOST:$PORT" "$(echo $RESPONSE | jq -r .servers[].url)"
+```
+
+> - '/eureka/api/' 로 시작하는 모든 요청은 유레카 API로 라우팅 된다.
+> - '/eureka/web/' 로 시작하는 모든 요청은 유레카 웹페이지로 라우팅 된다.
+
+API 리퀘스트는 http://${app.eureka-server}:8761/eureka 로 라우팅 될 것이다. 유레카 API를 위한 라우팅 룰은 다음과 같다.
+```yaml
+- id: eureka-api
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/api/{segment}
+  filters:
+  - SetPath=/eureka/{segment}
+```
+
+Path 값의 {segment} 부분은 경로에서 모든 요소와 일치하며, SetPath 값의 {segment} 부분을 대체하는 데 사용된다.
+웹 페이지 요청은 http://${app.eureka-server}:8761로 라우팅된다. 웹 페이지는 .js, .css, .png 파일 등 여러 웹 리소스를 로드한다.
+이러한 요청들은 http://${app.eureka-server}:8761/eureka로 라우팅된다. Eureka 웹 페이지에 대한 라우팅 규칙은 다음과 같다.
+```yaml
+- id: eureka-web-start
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/web
+  filters:
+  - SetPath=/
+- id: eureka-web-other
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/**
+```
+
+${app.eureka-server} 값은 스프링 설정의 프로퍼티값에 따라 바뀌는 것이다. 로컬 환경에서는 localhost, 도커환경에서는 eureka이다.
+```yaml
+app.eureka-server: localhost
+---
+spring.config.activate.on-profile: docker
+app.eureka-server: eureka
+```
+
+#### Predicates와 Filters를 이용한 요청 라우팅
+
+http://httpstat.us/${CODE} 를 호출하면 간단하게 ${CODE}에 넣은 HTTP Status 응답을 리턴해준다. 테스트하기에 용이하다. 이후 테스트에 사용하기 위해 application.yml에 라우팅 규칙을 추가했다. 참고할 것.
+
+> - i.feel.lucky 호출 시 return 200 OK
+> - im.a.teapot  호출 시 return 418 I'm a teapot
+> - 그 외 호스트네임 호출 시 return 501 Not Implemented
+
+### 엣지 서버 테스트
+
+1. 프로젝트 빌드
+```shell
+./gradlew clean build && docker-compose build
+```
+
+2. 스크립트 테스트
+```shell
+./test-em-all.bash start
+```
+
+3. 엣지서버만이 노출된 http://localhost:8080 을 통해 HTTP 통신을 하는지 확인할 것.
+
+#### ***아래의 포인트들을 짚어보며 테스트를 한다.***
+
+> - Docker 엔진에서 실행되는 시스템 랜드스케이프 외부에 엣지 서버가 무엇을 노출하는지 테스트한다.
+> - 다음과 같은 가장 자주 사용되는 라우팅 규칙 중 일부를 테스트한다.
+>   - 엣지 서버를 통해 API를 호출하기 위한 URL 기반 라우팅 사용
+>   - 엣지 서버를 통해 Swagger UI를 호출하기 위한 URL 기반 라우팅 사용
+>   - API와 웹 기반 UI 모두를 사용하여 Netflix Eureka를 호출하기 위한 URL 기반의 라우팅 사용
+>   - 요청의 호스트명에 따라 요청을 어떻게 라우팅할 수 있는지 보기 위해 헤더 기반의 라우팅 사용
+
+#### 도커 엔진이 어떤것들을 외부로 노출시켰는지 확인
+
+1. docker-compose ps 를 사용
+```shell
+docker-compose ps gateway eureka product-composite product recommendation review
+```
+
+2. 다음과 같은 결과를 볼 수 있는데 엣지 서버(Spring Cloud Gateway)만이 8080 포트를 도커엔진 외부로 노출시키고 있음을 알 수 있다.
+![](./images/img_6.png)
+
+3. 엣지서버에 셋팅된 라우팅 정보를 알고 싶다면 `/actuator/gateway/routes` 를 호출하면 된다. 필요한 정보만 보기 위해 jq 필터를 쓴다.
+```shell
+curl localhost:8080/actuator/gateway/routes -s | jq '.[] | {"\(.route_id)": "\(.uri)"}' | grep -v '{\|}'
+```
+
+### 라우팅 룰 테스트
+
+#### 엣지 서버를 통한 product-composite API 호출
+
+1. 엣지 서버에서 무슨 일이 일어나고 있는지 보기 위해 로그를 출력한다.
+```shell
+docker-compose logs -f --tail=0 gateway
+```
+
+2. 다른 창에서 product-composite API를 호출해본다.
+```shell
+curl http://localhost:8080/product-composite/1
+```
+
+3. 올바른 데이터가 출력되는 것을 확인한다.
+4. 다음과 같은 로그를 확인한다.
+```text
+Pattern "/product-composite/**" matches against value "/product-composite/1"
+Route matched: product-composite
+...
+LoadBalancerClientFilter url chosen: http://c46dfcbef421:8080/product-composite/1
+```
+
+5. 로그 출력에서 우리는 Configuration에서 지정한 predicate에 기반한 패턴 매칭을 볼 수 있고, 디스커버리 서버의 사용 가능한 인스턴스 중에서 엣지 서버가 어떤 마이크로서비스 인스턴스를 선택했는지 볼 수 있다.
+이 경우, 그것은 요청을 http://c46dfcbef421:8080/product-composite/1로 전달합니다. 이는 product-composite 서비스의 instanceId이자 Docker Container ID가 호스트네임이 되었다.
+
+### Swagger UI 호출
+http://localhost:8080/openapi/swagger-ui.html 로 접속하면 Swagger UI를 확인할 수 있다.
 
 
+### 엣지 서버를 통한 유레카 서버 호출
+1. 디스커버리 서버에 어떤 인스턴스들이 등록되었는지를 확인하기 위해 엣지서버를 통해 유레카 API를 호출한다.
+```shell
+curl -H "accept:application/json" \
+localhost:8080/eureka/api/apps -s | \
+jq -r .applications.application[].instance[].instanceId
+```
+
+2. 응답 확인
+
+3. 유레카 웹 페이지 열어보기 http://localhost:8080/eureka/web
 
 
+### 헤더 기반 라우팅
 
+1. i.feel.lucky 호스트네임을 호출하기 위해 이하 코드 호출. (200 OK)
+```shell
+curl http://localhost:8080/headerrouting -H "Host: i.feel.lucky:8080"
+```
+
+2. im.a.teapot (418 I'm a teapot)
+```shell
+curl http://localhost:8080/headerrouting -H "Host: im.a.teapot:8080"
+```
+
+3. Host 헤더가 없을 시 (501 Not Implemented)
+```shell
+curl http://localhost:8080/headerrouting
+```
+
+### 테스트 종료
+```shell
+docker-compose down
+```
 
 
 
