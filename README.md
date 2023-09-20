@@ -1852,6 +1852,573 @@ curl http://localhost:8080/headerrouting
 docker-compose down
 ```
 
+## Securing Access to APIs
+
+### OAuth2.0 : Authorization code grant flow
+
+Resource owner: 최종 사용자.
+Client: 최종 사용자를 대신하여 보호된 API를 호출하려는 제3의 클라이언트 애플리케이션, 예를 들어 웹 앱 또는 네이티브 모바일 앱.
+Resource server: 우리가 보호하려는 API를 제공하는 서버. (내가 만든 어플리케이션 서버)
+Authorization server: 인증 서버는 리소스 소유자, 즉 최종 사용자가 인증된 후에 클라이언트에게 토큰을 발급한다. 사용자 정보의 관리와 사용자의 인증은 일반적으로 뒷단에서 Identity Provider(IdP)에게 위임된다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_11_01.png)
+
+1. 클라이언트 애플리케이션은 웹 브라우저에서 사용자를 인증 서버로 보내는 것으로 허가 흐름을 시작한다.
+2. 인증 서버는 사용자를 인증하고 사용자의 동의를 요청한다.
+3. 인증 서버는 인가 코드와 함께 사용자를 클라이언트 애플리케이션으로 다시 리디렉션한다. 인증 서버는 1단계에서 클라이언트가 지정한 리디렉션 URI를 사용하여 인가 코드를 어디로 보낼지 결정한다. 인가 코드는 웹 브라우저, 즉 잠재적으로 악성 JavaScript 코드가 인가 코드를 가져갈 수 있는 불안전한 환경을 통해 클라이언트 애플리케이션으로 전달되기 때문에 한 번만 사용할 수 있으며, 짧은 시간 동안만 사용할 수 있다.
+4. 인가 코드를 액세스 토큰으로 교환하기 위해, 클라이언트 애플리케이션이 다시 인증 서버를 호출하도록 요구한다. 클라이언트 애플리케이션은 클라이언트 ID와 클라이언트 비밀번호, 그리고 인가 코드를 함께 제출해야 한다. 이 때, 클라이언트 비밀번호는 민감한 정보로 보호되어야 하므로 이 호출은 반드시 서버 쪽에서 실행되어야 한다.
+5. 인증 서버는 액세스 토큰을 발급하고 이것을 클라이언트 어플리케에게 전송한다. 필요에 따라서, 인증 서버는 리프레시 토큰도 발행하고 반환할 수 있다.
+6. 클라이언트는 액세스 토큰을 이용하여 리소스 서버에 의해 제공된 보호된 API에 요청을 보낼 수 있다.
+7. 자원 서버는 액세스 토큰을 검사하고 검사에 성공하는 경우 요청을 처리한다. 6단계와 7단계는 액세스 토큰의 유효기간 동안 반복될 수 있다. 액세스 토큰의 수명이 만료되면, 클라이언트는 리프레시 토큰을 사용하여 새로운 접근 토큰을 얻을 수 있다.
+
+
+### Securing the system landscape
+
+> - 도청을 방지하기 위해 HTTPS를 사용하여 외부 API로부터의 요청과 응답을 암호화한다.
+> - OAuth 2.0과 OpenID Connect를 사용하여 API에 접근하는 사용자와 클라이언트 애플리케이션을 인증하고 권한을 부여한다.
+> - HTTP basic authentication을 사용하여 Netflix Eureka라는 디스커버리 서버에 대한 접근을 보호한다.
+
+테스트 목적으로, 우리는 시스템 구성에 로컬 OAuth 2.0 인증 서버를 추가할 것이다. 인증 서버와의 모든 외부 통신은 엣지 서버를 통해 라우팅된다. 엣지 서버와 product-composite 서비스는 OAuth 2.0 리소스 서버로 작동하며, 즉 유효한 OAuth 2.0 액세스 토큰을 필요로 하여 접근을 허용한다.  
+액세스 토큰 검증의 오버헤드를 최소화하기 위해, 우리는 이들이 signed JWTs로 인코딩되었다고 가정하고, 인증 서버가 리소스 서버가 사용할 수 있는 공개키(JSON Web Key Set 또는 줄여서 jwk-set, 서명을 검증하는데 필요)에 접근하는 endpoint를 제공한다고 가정한다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_11_02.png)
+
+> - HTTPS는 외부 통신에 사용되며, 일반 텍스트 HTTP는 시스템 구성 내에서 사용된다.
+> - 로컬 OAuth 2.0 인증 서버는 엣지 서버를 통해 외부에서 접근된다.
+> - 엣지 서버와 product-composite 마이크로서비스 모두 액세스 토큰을 signed JWTs로 검증합니다.
+> - 엣지 서버와 product-composite 마이크로서비스는 인증 서버의 jwk-set endpoint에서 공개키를 가져와 JWT 기반 액세스 토큰의 서명을 검증하는 데 사용합니다.
+
+### Protecting external communication with HTTPS
+
+#### 자기 서명 인증서 생성 (패스워드: password)
+```shell
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore edge.p12 -validity 3650
+```
+
+> - 소스코드 안에 인증서가 포함되어 있으므로 직접 생성할 필요 없음. gateway 프로젝트 내 src/main/resources/keystore/edge.p12 참고.
+> - 이는 인증서가 빌드 타이밍에 .jar 파일 내에 위치한다는 것을 의미하며 런타임시엔 클래스패스 상 keystore/edge.p12 에 위치한다.  
+
+HTTPS와 인증서를 사용하기 위해 엣지서버를 설정한다. gateway 프로젝트의 application.yml 파일을 수정한다.
+```yaml
+server.port: 8443
+server.ssl:
+ key-store-type: PKCS12
+ key-store: classpath:keystore/edge.p12
+ key-store-password: password
+ key-alias: localhost
+```
+
+#### 자가 서명 인증서 대체
+jar 파일에 자체 서명된 인증서를 넣는 것은 개발에만 유용하다. 예를 들어 테스트나 운영 환경과 같은 런타임 환경에서 작동하는 솔루션을 위해서는, 인증된 CA(Certificate Authorities)가 서명한 인증서를 사용할 수 있어야 한다.  
+또한 jar 파일을 다시 빌드할 필요 없이 런타임 동안 사용할 인증서를 지정할 수 있어야 하며, Docker를 사용할 때 jar 파일이 포함된 Docker 이미지도 마찬가지다.
+Docker Compose를 사용하여 Docker 컨테이너를 관리하는 경우, Docker 컨테이너의 볼륨을 Docker 호스트에 있는 인증서로 매핑할 수 있다.
+또한 Docker 컨테이너의 환경 변수를 설정하여 Docker 볼륨 내의 외부 인증서를 가리키게 할 수도 있다.
+
+
+인증서 대체를 위해 다음을 따라한다.
+
+
+1. 인증서를 하나 더 생성한다. 패스워드는 testtest로 설정한다.
+```shell
+mkdir keystore
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore keystore/edge-test.p12 -validity 3650
+```
+
+2. docker-compose.yml 파일을 수정한다. 인증서의 패스, 인증서의 패스워드, 인증서 폴더가 맵핑 된 볼륨이 추가되었다.
+```yaml
+gateway:
+  environment:
+    - SPRING_PROFILES_ACTIVE=docker
+    - SERVER_SSL_KEY_STORE=file:/keystore/edge-test.p12
+    - SERVER_SSL_KEY_STORE_PASSWORD=testtest
+  volumes:
+    - $PWD/keystore:/keystore
+  build: spring-cloud/gateway
+  mem_limit: 512m
+  ports:
+    - "8443:8443"
+```
+
+3. 엣지서버가 기동 중이라면, 다음 커맨드로 재시동이 필요하다.
+```shell
+docker-compose up -d --scale gateway=0
+docker-compose up -d --scale gateway=1
+```
+
+### Securing access to the discovery server
+
+#### 유레카 서버 설정
+
+1. build.gradle
+```yaml
+implementation 'org.springframework.boot:spring-boot-starter-security'
+```
+
+2. SecurityConfig 클래스 추가
+ - 유저 정의
+```java
+@Bean
+public InMemoryUserDetailsManager userDetailsService() {
+  UserDetails user = User.withDefaultPasswordEncoder()
+      .username(username)
+      .password(password)
+      .roles("USER")
+      .build();
+  return new InMemoryUserDetailsManager(user);
+}
+```
+
+- username, password 주입
+```java
+@Autowired
+public SecurityConfig(
+  @Value("${app.eureka-username}") String username,
+  @Value("${app.eureka-password}") String password
+) {
+  this.username = username;
+  this.password = password;
+}
+```
+
+- 모든 API 및 웹페이지가 HTTP basic authentication으로 보호된다.
+```java
+@Bean
+public SecurityFilterChain configure(HttpSecurity http) throws Exception {
+  http
+    // Disable CRCF to allow services to register themselves with Eureka
+    .csrf()
+      .disable()
+    .authorizeRequests()
+      .anyRequest().authenticated()
+      .and()
+      .httpBasic();
+  return http.build();
+}
+```
+
+3. 계정정보 추가 (application.yml)
+```yaml
+app:
+ eureka-username: u
+ eureka-password: p
+```
+
+4. 마지막으로 EurekaServerApplicationTests 에서는 설정 파일에 저장된 계정 정보를 이용해 유레카 서버를 테스트 한다.
+```java
+@Value("${app.eureka-username}")
+private String username;
+ 
+@Value("${app.eureka-password}")
+private String password;
+ 
+@Autowired
+public void setTestRestTemplate(TestRestTemplate testRestTemplate) {
+   this.testRestTemplate = testRestTemplate.withBasicAuth(username, password);
+}
+```
+
+상기 설정은 디스커버리 서버(유레카)에 접근을 제한하기 위해 필요하다. 이제부턴 HTTP basic authentication을 사용하며 접근하기 위해서는 username과 password가 필요하다.
+마지막 설정은 디스커버리 서버에 접근하기 위해 유레카 클라이언트에 인증 정보를 설정하는 것이다.
+
+#### 유레카 클라이언트 설정
+
+application.yml 에 설정한다.
+```yaml
+app:
+  eureka-username: u
+  eureka-password: p
+ 
+eureka:
+  client:
+     serviceUrl:
+       defaultZone: "http://${app.eureka-username}:${app.eureka-password}@${app.eureka-server}:8761/eureka/"
+```
+
+### Adding a local authorization server 로컬 인증서버 추가
+
+OAuth 2.0과 OpenID Connect를 사용하여 보안된 API와 함께 로컬에서 테스트를 완전히 자동화하여 실행하기 위해, 이러한 사양에 준수하는 인증 서버를 시스템 구성에 추가할 것이다.
+Spring Security는 기본적으로 인증 서버를 제공하지 않았지만 2020년 4월, Spring Security 팀이 주도하는 커뮤니티 주도 프로젝트인 Spring Authorization Server가 인증 서버를 제공하는 목표로 밮표되었다.
+2021년 8월에는 Spring Authorization Server 프로젝트가 실험 상태에서 벗어나 Spring 프로젝트 포트폴리오의 멤버가 되었다.
+
+
+Spring Authorization Server는 OpenID Connect 디스커버리 엔드포인트의 사용과 액세스 토큰의 디지털 서명을 모두 지원한다.
+또한 디스커버리 정보를 사용하여 토큰의 디지털 서명을 검증하는 데 필요한 키를 얻기 위해 접근할 수 있는 엔드포인트도 제공한다.
+이러한 기능들을 지원함으로써, 시스템 구성이 예상대로 작동하는지 검증하는 로컬 및 자동화된 테스트에서 인증 서버로 사용될 수 있다.
+
+see. https://github.com/spring-projects/spring-authorization-server/tree/main/samples/default-authorizationserver
+
+> - OpenID Connect 규격에 따른 가장 중요한 엔드포인트에 대한 접근을 검증하는 단위 테스트가 추가되었다.
+> - 단일 등록 사용자의 사용자 이름과 비밀번호는 각각 u와 p로 설정된다.
+> - 두 개의 OAuth 클라이언트, reader와 writer가 등록되어 있다. reader 클라이언트에는 product:read 스코프가 부여되고, writer 클라이언트에는 product:read와 product:write 스코프 둘 다 부여된다. 클라이언트들은 각각 secret-reader와 secret-writer로 클라이언트 시크릿을 설정하도록 구성된다.
+> - 클라이언트들의 허용된 리다이렉션 URI들은 https://my.redirect.uri 와 https://localhost:8443/webjars/swagger-ui/oauth2-redirect.html 로 설정된다. 첫 번째 URI는 아래에서 설명할 테스트에서 사용되며, 두 번째 URI는 Swagger UI 컴포넌트에서 사용될 것이다.
+> - 보안상의 이유로 인증 서버는 기본적으로 https://localhost 로 시작하는 리다이렉션 URI를 허용하지 않는다.
+
+그러나 테스트 목적으로 인증서버는 https://localhost 를 허용하였다.  
+see. https://docs.spring.io/spring-authorization-server/docs/1.0.0/reference/html/protocol-endpoints.html#oauth2-authorization-endpoint-customizing-authorization-request-validation
+
+
+시스템 랜드스케이프에 맞춰서 다음 요소가 수정 및 적용되었다.
+
+> - 공통 빌드 파일인 settings.gradle에 서버가 추가됨.
+> - docker-compose.yml에 서버가 추가됨.
+> - 인증 서버 헬스체크를 위해 HealthCheckConfiguration 클래스 추가 (gateway)
+> - application.yml에 인증 서버에 대한 라우팅 규칙 추가 (/oauth, /login, /error). 이들 URI는 클라이언트에게 토큰을 발급, 사용자 인증, 에러 메시지를 표시하기 위해 사용된다. (gateway)
+> - 이들 세 개의 URI는 엣지 서버에 의해 보호되지 않아야 하므로, SecurityConfig 클래스에 이들 URI에 대한 모든 요청을 허용하는 설정을 추가한다. (gateway)
+
+### Protecting APIs using OAuth 2.0 and OpenID Connect
+
+인증 서버가 준비되면, 엣지 서버와 product-composite 서비스를 OAuth 2.0 리소스 서버로 강화하여 유효한 액세스 토큰이 있어야만 접근을 허용하도록 만들 수 있다.
+엣지 서버는 인증 서버에서 제공하는 디지털 서명을 사용하여 검증할 수 있는 모든 액세스 토큰을 받아들일 것으로 설정할 것이다.
+또한 product-composite 서비스는 액세스 토큰이 유효한 OAuth 2.0 스코프를 포함하도록 요구할 것이다.
+
+> - product:read 스코프는 product-composite 서비스의 read-only API를 호출하기 위해 사용된다.
+> - product:write 스코프는 product-composite 서비스의 create 및 delete API를 호출하기 위해 사용된다.
+
+product-composite 서비스는 또한 Swagger UI 컴포넌트가 인증 서버와 상호작용하여 액세스 토큰을 발급할 수 있도록 하는 설정으로 강화될 것입니다.
+이렇게 하면 Swagger UI 웹 페이지의 사용자들이 보호된 API를 테스트할 수 있습니다.
+
+### 엣지 서버, product-composite 서비스 변경
+
+- OAuth2.0을 지원하기 위해 리소스 서버(gateway, product-composite)에 build.gradle 에 의존성 추가
+```yaml
+implementation 'org.springframework.boot:spring-boot-starter-security'
+implementation 'org.springframework.security:spring-security-oauth2-resource-server'
+implementation 'org.springframework.security:spring-security-oauth2-jose'
+```
+
+- 양쪽에 SecurityConfig 클래스 추가
+```java
+@Configuration
+@EnableWebFluxSecurity
+public class SecurityConfig {
+ 
+  @Bean
+  SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+    http
+      .authorizeExchange()
+        .pathMatchers("/actuator/**").permitAll()
+        .anyExchange().authenticated()
+        .and()
+      .oauth2ResourceServer()
+        .jwt();
+    return http.build();
+  }
+}
+```
+
+> - @EnableWebFluxSecurity 어노테이션은 Spring WebFlux 기반의 API에 대한 Spring Security 지원을 활성화한다.
+> - .pathMatchers("/actuator/**").permitAll()는 보호되지 않아야 하는 URL에 대해 제한 없는 접근을 허용하는 데 사용된다. actuator 엔드포인트는 프로덕션으로 넘어가기 전에 보호되어야 합니다.
+> - .anyExchange().authenticated()은 모든 다른 URL로의 접근을 허용하기 전에 사용자가 인증받았음을 확인한다.
+> - .oauth2ResourceServer().jwt()은 인증이 JWT로 인코딩된 OAuth 2.0 액세스 토큰을 기반으로 할 것임을 지정한다.
+
+
+> - 시스템 랜드스케이프가 시작되면 디스커버리 엔드포인트를 테스트할 수 있다. 예를 들어, 토큰의 디지털 서명을 검증하는 데 필요한 키를 반환하는 엔드포인트를 찾기 위해 이 명령을 사용할 수 있다.  
+    ```docker-compose exec auth-server curl localhost:9999/.well-known/openid-configuration -s | jq -r .jwks_uri```
+
+
+### product-composite 서비스만의 변경점
+
+> - SecurityConfig 클래스의 보안 구성은 액세스 토큰에 OAuth 2.0 스코프를 요구함으로써 액세스를 허용하도록 개선되었다.
+
+```java
+.pathMatchers(POST, "/product-composite/**")
+  .hasAuthority("SCOPE_product:write")
+.pathMatchers(DELETE, "/product-composite/**")
+  .hasAuthority("SCOPE_product:write")
+.pathMatchers(GET, "/product-composite/**")
+  .hasAuthority("SCOPE_product:read")
+```
+
+> - 컨벤션에 따라 Spring Security를 사용하여 권한을 확인할 때 OAuth 2.0 스코프는 SCOPE_로 접두사를 붙여야 한다.
+
+> - JWT로 인코딩된 액세스 토큰으로부터 관련 부분을 기록하기 위해 logAuthorizationInfo() 메소드가 API 호출 시마다 추가되었다. 액세스 토큰은 표준 Spring Security SecurityContext를 사용하여 얻을 수 있으며, 리액티브 환경에서는 정적 도우미 메소드인 ReactiveSecurityContextHolder.getContext()를 사용하여 얻을 수 있다. 자세한 내용은 ProductCompositeServiceImpl 클래스를 참조.
+> - Spring 기반 통합 테스트를 실행할 때 OAuth 사용이 비활성화되었습니다. 통합 테스트를 실행할 때 OAuth 메커니즘이 작동하지 않도록 하기 위해 다음과 같이 비활성화합니다:
+>   - 테스트 중에 사용할 TestSecurityConfig라는 보안 구성이 추가되었습니다. 이 구성은 모든 리소스에 대한 액세스를 허용합니다.  
+```java
+http.csrf().disable().authorizeExchange().anyExchange().permitAll();
+```
+> - - 각 Spring 통합 테스트 클래스에서는 다음과 같이 기존의 보안 구성을 무시하고 TestSecurityConfig를 구성한다.  
+
+```java
+@SpringBootTest( 
+  classes = {TestSecurityConfig.class},
+  properties = {"spring.main.allow-bean-definition-overriding=true"})
+```
+
+#### Swagger UI가 액세스 토큰을 얻을 수 있도록 변경
+
+> - product-composite 서비스의 SecurityConfig에 추가
+```java
+.pathMatchers("/openapi/**").permitAll()
+.pathMatchers("/webjars/**").permitAll()
+```
+> - 시큐리티 스키마 ```security_auth```를 얻기 위해서 OpenAPI 스펙이 더해졌다. (OpenApiConfig.java 참조)
+
+API 서비스의 ProductCompositeService에 다음이 추가되었다.
+```java
+@SecurityRequirement(name = "security_auth")
+```
+
+> - 보안 스키마 security_auth의 의미를 정의하기 위해 product-composite 프로젝트에 OpenApiConfig 클래스가 추가되었다.
+```java
+@SecurityScheme(
+  name = "security_auth", type = SecuritySchemeType.OAUTH2,
+  flows = @OAuthFlows(
+    authorizationCode = @OAuthFlow(
+      authorizationUrl = "${springdoc.oAuthFlow.authorizationUrl}",
+      tokenUrl = "${springdoc.oAuthFlow.tokenUrl}", 
+      scopes = {
+        @OAuthScope(name = "product:read", description = "read scope"),
+        @OAuthScope(name = "product:write", description = "write scope")
+      }
+)))
+public class OpenApiConfig {}
+```
+
+위의 코드를 통해 알 수 있는 것은
+
+> - 보안 스키마는 OAuth 2.0을 기반으로 한다.
+> - 인가 코드 승인 흐름(grant flow)이 사용될 것이다.
+> - 인가 코드와 액세스 토큰을 얻기 위한 필요한 URL은 springdoc.oAuthFlow.authorizationUrl 및 springdoc.oAuthFlow.tokenUrl 매개변수를 사용하여 구성에서 제공될 것이다.
+> - Swagger UI가 API를 호출할 수 있도록 필요한 스코프 목록은 ```product:read``` 및 ```product:write```이다.
+
+마지막으로 application.yml에 추가된 몇몇 설정
+```yaml
+  swagger-ui:
+    oauth2-redirect-url: /swagger-ui/oauth2-redirect.html
+    oauth:
+      clientId: writer
+      clientSecret: secret-writer
+      useBasicAuthenticationWithAccessCodeGrant: true
+  oAuthFlow:
+    authorizationUrl: https://localhost:8443/oauth2/authorize
+    tokenUrl: https://localhost:8443/oauth2/token
+```
+
+위 설정을 통해 알 수 있는 것은
+> - Swagger UI가 인증 코드를 얻기 위해 사용할 리디렉션 URL.
+> - client id와 client secret.
+> - 인증 서버에 대해 자신을 식별할 때 HTTP 기본 인증을 사용.
+> - 앞에서 설명한 OpenApiConfig 클래스에서 사용되는 authorizationUrl 및 tokenUrl 매개변수의 값. 이 URL은 웹 브라우저에서 사용되며 product-composite 서비스 자체에서 사용되지 않는다.
+
+위 설정들을 함으로써 엣지 서버와 product-composite 서비스가 OAuth 2.0 리소스 서버로 동작할 수 있게 되었다.  
+또한 Swagger UI 컴포넌트는 OAuth 2.0 클라이언트로 동작한다. OAuth 2.0 및 OpenID Connect의 사용법을 소개하기 위해 수행해야 할 마지막 단계는 테스트 스크립트를 업데이트하여 액세스 토큰을 획득하고 테스트 실행 시 사용해보는 것이다.
+
+### 테스트 스크립트 업데이트
+
+먼저, 우리는 헬스체크 API를 제외한 모든 API를 호출하기 전에 액세스 토큰을 얻어야 한다. 생성 및 삭제 API를 호출할 수 있도록 `wrtier` 클라이언트로 액세스 토큰을 얻는다.
+
+```shell
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+```
+
+위 커맨드에서는 HTTP Basic Authentication을 사용하고 있으며, hostname 앞에 writer:secret-writer@로 client id와 client secret을 전달하고 있다.  
+스코프 기반의 인증을 테스트하기 위해 두 개의 테스트 케이스가 스크립트에 추가되었다.
+
+```shell
+# Verify that a request without access token fails on 401, Unauthorized
+assertCurl 401 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+# Verify that the reader client with only read scope can call the read API but not delete API
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .access_token -r)
+READER_AUTH="-H \"Authorization: Bearer $READER_ACCESS_TOKEN\""
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $READER_AUTH -s"
+assertCurl 403 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $READER_AUTH -X DELETE -s"
+```
+
+> - 첫 번째 테스트는 액세스 토큰을 제공하지 않고 API를 호출한다. API는 401 Unauthorized HTTP 상태를 반환하는 것으로 예상한다.
+> - 두 번째 테스트는 reader 클라이언트가 읽기 전용 API를 호출할 수 있는지 확인한다.
+> - 마지막 테스트는 읽기 권한만 부여된 reader 클라이언트를 사용하여 업데이트 API를 호출한다. 삭제 API로 보내는 요청은 403 Forbidden HTTP 상태를 반환하는 것으로 예상한다.
+
+
+### 로컬 인증 서버를 통한 테스트
+
+1. 먼저, 소스에서 빌드하고 테스트 스크립트를 실행하여 모든 것이 함께 작동하는지 확인한다.
+2. 다음으로, 우리는 보호된 검색 서버의 API와 웹 페이지를 테스트한다.
+3. 그 후에, OAuth 2.0 클라이언트 자격 증명 및 승인 코드 그랜트 플로우를 사용하여 액세스 토큰을 얻는 방법을 배우게 된다.
+4. 발급된 액세스 토큰을 사용하여 보호된 API를 테스트할 것이다. 또한, reader 클라이언트에 대해 발급된 액세스 토큰을 사용하여 업데이트 API를 호출할 수 있는지도 확인할 것입니다. (이는 실패해야 한다.)
+5. 마지막으로, Swagger UI가 액세스 토큰을 발급하고 API를 호출할 수 있는지도 확인할 것이다.
+
+```shell
+./gradlew build && docker-compose build
+./test-em-all.bash start
+```
+
+### 보호된 디스커버리 서버(유레카) 테스트
+
+Eureka라는 보호된 디시커버리 서버가 실행 중인 경우, 해당 API 및 웹 페이지에 액세스 할 수 있도록 유효한 자격 증명을 제공해야 한다.
+예를 들어, 등록된 인스턴스를 Eureka 서버에 요청하는 것은 다음과 같은 curl 명령을 통해 수행 할 수 있다. 여기서는 URL에 직접 사용자 이름과 비밀번호를 제공한다.
+
+```shell
+curl -H "accept:application/json" https://u:p@localhost:8443/eureka/api/apps -ks | jq -r .applications.application[].instance[].instanceId
+```
+
+웹페이지 `https://localhost:8443/eureka/web` 를 통해 직접 접속하는 경우 브라우저가 사용자 이름과 비밀번호를 묻는데 username=u, password=p를 직접 입력한다.
+
+### 액세스 토큰 획득
+
+#### 클라이언트 자격 증명 흐름을 통해 액세스 토큰 획득
+
+`writer` 클라이언트, 즉, `product:reader`와 `product:writer` 스코프를 모두 가진 액세스 토큰을 얻는다.
+
+```shell
+curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .
+```
+
+```shell
+{
+  "access_token": "eyJraWQiOiI...",
+  "scope": "product:write product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+
+> - 액세스 토큰 자체.
+> - 토큰에 부여된 스코프. writer 클라이언트는 product:write 및 product:read 스코프 모두를 부여받았다. 또한 openid 스코프도 부여받았으며, 이는 사용자의 ID에 관한 정보에 액세스할 수 있도록 해준다. 예를 들어 이메일 주소와 같은 정보.
+> - 받은 토큰의 유형. Bearer는 이 토큰의 소유자가 토큰에 부여된 스코프에 따라 액세스를 받아야 함을 의미한다.
+> - 액세스 토큰의 유효한 시간(이 경우 3599초)이다.
+
+#### Authorization Code Grant Flow(인가 코드 그랜트 플로우)를 통한 액세스 토큰 획득
+인증 코드 그랜트 플로우를 사용하여 액세스 토큰을 얻으려면 웹 브라우저를 사용해야한다. 이 그랜트 플로우는 `부분적으로 보안되지 않은 환경(웹 브라우저 안)`에서도 안전을 보장하기 위해 약간 복잡해진다.
+첫 번째 보안되지 않은 단계에서는 웹 브라우저를 사용하여 액세스 토큰으로 교환할 수 있는 단 한 번만 사용할 수 있는 인증 코드를 얻는다.
+인증 코드는 웹 브라우저에서 안전한 레이어 (예: 서버 측 코드)로 전달되어 인증 서버에 대한 새로운 요청을 생성하여 인증 코드를 액세스 토큰으로 교환한다.
+이 안전한 교환에서 서버는 신원을 확인하기 위해 client secret을 제공해야 한다. 다음 단계를 수행하여 인증 코드 그랜트 플로우를 실행하라.
+
+1. reader 클라이언트를 위한 인가 코드를 얻기 위해 다음 URL을 실행한다.  
+`https://localhost:8443/oauth2/authorize?response_type=code&client_id=reader&redirect_uri=https://my.redirect.uri&scope=product:read&state=35725`
+2. 접속을 위한 username u, password p를 입력한다.
+3. reader 클라이언트 승낙을 요구받게 되면 체크 후 승낙한다.
+4. `Submit Consent` 버튼을 누르면 `ERR_NAME_NOT_RESOLVED` 화면을 보게 된다.
+5. 처음 보면 조금 실망스러울 수도 있다. 인증 서버가 웹 브라우저로 다시 보낸 URL은 초기 요청에서 클라이언트가 지정한 리다이렉트 URI를 기반으로 한다. URL을 텍스트 편집기로 복사하면 다음과 비슷한 내용을 찾을 수 있다.  
+   `https://my.redirect.uri/?code=7XBs...0mmyk&state=35725`  
+   리다이렉트 URL 중 code 요청 매개변수에서 인증 코드를 찾을 수 있다. code 매개변수에서 인증 코드를 추출하고 그 값을 가진 `환경 변수(Environment Variable)` CODE를 정의하라.  
+   `CODE=7XBs...0mmyk`
+6. 다음 curl 명령을 사용하여 인증 코드를 액세스 토큰으로 교환하는 백엔드 서버인 척 해보자.
+```shell
+curl -k https://reader:secret-reader@localhost:8443/oauth2/token \
+ -d grant_type=authorization_code \
+ -d client_id=reader \
+ -d redirect_uri=https://my.redirect.uri \
+ -d code=$CODE -s | jq .
+```
+응답:
+```shell
+{
+  "access_token": "eyJraWQiOiIyYTNlYjI5MS0xZjg4LTQyMjUtYTI2NC1iNzZiNDVkYjI5NTkiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoicmVhZGVyIiwibmJmIjoxNjk1MTk0MjcwLCJzY29wZSI6WyJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE2OTUxOTc4NzAsImlhdCI6MTY5NTE5NDI3MH0.fsK9HrHMOreDx1XqVj8QTfruLW3Vh0ZngGW6UFhanG6dOKDHWh4gtCy33SnfVGsphRGqJZRuqwIi7TNxKEmI0mldiK9VytwW-5K6Okg5chEBfPeF2dLLm7uh-fo7imv6SkzrpCJUqotzwevGr2qS97bOwoKWwXBTBOVtsV20QDrm7TfEpkMUGOBnPZid3D6kh6of3bUsoPcQ9HJzdQD-_PdO4TRHUsNjin637goZkq1g8WqVf3E7o-2MRqYSLl9FIHqHTMNwUTe-v2Z4GNSk7Onq3n4DWTzPo4oM9dFgoI2nhIbJ1yz-_20Mg5U5jrzDr4SfiRncK70K04LPaOuSDw",
+  "refresh_token": "9UAjCbXNW_myJ5YRRcSwakTyAAkgBCe4RdJ1TaN_PWl1mBW3pDgIHnITkdy1DmSf40eUIQu3cPiVZdYpUR2DbCr-4NGre_h7Mw6csVakBvI2J9EOu3yFqY95vsH2dk0x",
+  "scope": "product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+
+위에서 볼 수 있듯이, 클라이언트 자격 증명 흐름에서 받은 것과 유사한 정보를 응답에서 얻었지만, 다음과 같은 다른점이 있다.
+
+> - 더 안전한 권한 흐름을 사용했기 때문에, 리프레시 토큰도 발급되었다.
+> - reader 클라이언트를 위한 액세스 토큰을 요청했기 때문에, product:write 스코프 없이 product:read 스코프만 얻었다,
+
+### 액세스 토큰을 사용하여 보호된 API 호출
+
+1. 액세스 토큰 없이 product-composite API 호출해보기
+```shell
+ACCESS_TOKEN=an-invalid-token
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+응답:
+```shell
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token", error_description="An error occurred while attempting to decode the Jwt: Invalid JWT serialization: Missing dot delimiter(s)", error_uri="https://tools.ietf.org/html/rfc6750#section-3.1"
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+content-length: 0
+```
+
+2. reader 클라이언트를 위해 이전 단계에서 획득했던 액세스 토큰을 넣어 테스트 해보기
+```shell
+ACCESS_TOKEN=eyJraWQiOiIyYTNlYjI5MS0xZjg4LTQyMjUtYTI2NC1iNzZiNDVkYjI5NTkiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoicmVhZGVyIiwibmJmIjoxNjk1MTk0MjcwLCJzY29wZSI6WyJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE2OTUxOTc4NzAsImlhdCI6MTY5NTE5NDI3MH0.fsK9HrHMOreDx1XqVj8QTfruLW3Vh0ZngGW6UFhanG6dOKDHWh4gtCy33SnfVGsphRGqJZRuqwIi7TNxKEmI0mldiK9VytwW-5K6Okg5chEBfPeF2dLLm7uh-fo7imv6SkzrpCJUqotzwevGr2qS97bOwoKWwXBTBOVtsV20QDrm7TfEpkMUGOBnPZid3D6kh6of3bUsoPcQ9HJzdQD-_PdO4TRHUsNjin637goZkq1g8WqVf3E7o-2MRqYSLl9FIHqHTMNwUTe-v2Z4GNSk7Onq3n4DWTzPo4oM9dFgoI2nhIbJ1yz-_20Mg5U5jrzDr4SfiRncK70K04LPaOuSDw
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i 
+```
+응답:
+```shell
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 714
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+
+{"productId":1,"name":"product name C","weight":300,"recommendations":[{"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},{"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},{"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}],"reviews":[{"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},{"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},{"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}],"serviceAddresses":{"cmp":"1ef929870e66/172.19.0.9:8080","pro":"9b1784fffa93/172.19.0.10:8080","rev":"53d0ef15f347/172.19.0.11:8080","rec":"3ade6fff7278/172.19.0.8:8080"}}
+```
+
+3. 만일 읽기가 아닌 수정 API를 호출하면 실패할 것이다.
+```shell
+ACCESS_TOKEN=eyJraWQiOiIyYTNlYjI5MS0xZjg4LTQyMjUtYTI2NC1iNzZiNDVkYjI5NTkiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoicmVhZGVyIiwibmJmIjoxNjk1MTk0MjcwLCJzY29wZSI6WyJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE2OTUxOTc4NzAsImlhdCI6MTY5NTE5NDI3MH0.fsK9HrHMOreDx1XqVj8QTfruLW3Vh0ZngGW6UFhanG6dOKDHWh4gtCy33SnfVGsphRGqJZRuqwIi7TNxKEmI0mldiK9VytwW-5K6Okg5chEBfPeF2dLLm7uh-fo7imv6SkzrpCJUqotzwevGr2qS97bOwoKWwXBTBOVtsV20QDrm7TfEpkMUGOBnPZid3D6kh6of3bUsoPcQ9HJzdQD-_PdO4TRHUsNjin637goZkq1g8WqVf3E7o-2MRqYSLl9FIHqHTMNwUTe-v2Z4GNSk7Onq3n4DWTzPo4oM9dFgoI2nhIbJ1yz-_20Mg5U5jrzDr4SfiRncK70K04LPaOuSDw
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i
+```
+응답:
+```shell
+HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope", error_description="The request requires higher privileges than provided by the access token.", error_uri="https://tools.ietf.org/html/rfc6750#section-3.1"
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+content-length: 0
+```
+
+4. writer 클라이언트로써 획득한 액세스 토큰으로 3의 시도를 한다면 성공화 함께 202 응답을 얻을 것이다.
+
+> 삭제 연산은 멱등성을 가지므로(요소가 있으면 제거하고, 요소가 없으면 제거하지 않는다. 즉, 여러번 실행해도 동일한 효과가 있으므로 멱등성이 성립함), 지정된 제품 ID의 제품이 기본 데이터베이스에 존재하지 않더라도 삭제 연산은 202를 반환해야 한다.
+
+
+### AOuth 2.0을 이용한 Swagger UI 테스트
+
+1. 웹 브라우저에서 `https://localhost:8443/openapi/swagger-ui.html` 접속
+2. 시작 페이지에서 새로운 버튼 `Authorize` 버튼이 추가되었다. 인가 코드 그랜트 플로우를 시작하기 위해 클릭한다.
+3. Swagger UI는 권한 서버에 액세스 요청할 스코프 목록을 보여준다. 'select all'이라는 텍스트의 링크를 클릭하여 모든 스코프를 선택하고, 그 다음 'Authorize' 버튼을 클릭.
+
+![](./images/img_7.png)
+
+4. 인증 서버는 사용자 이름과 비밀번호를 요구한다. username u, password p를 입력하고 'Sign in' 버튼을 클릭한다.
+5. Consent required 페이지에서는 모든 권한을 선택 후 'Submit Consent' 버튼 클릭.
+
+![](./images/img_8.png)
+
+6. Swagger UI는 모든 인가 과정을 끝내고 그랜트 플로우 결과 창을 보여준다. Close 버튼을 누르고 시작 페이지로 돌아간다.
+7. API 테스트를 시작할 수 있다.
+
+### 외부 OpenID Connect 공급자를 사용한 테스트 (Testing with an external OpenID Connect provider)
+
+직접 제어하는 인증 서버와 OAuth는 잘 작동하는 것을 확인했다. 하지만 이를 인증된 OpenID Connect 제공자로 교체하면 어떻게 될까? 이론적으로는 별도 설정없이 바로(out of the box) 작동해야 합니다. 확인해 보자.
+
+> 인증된 OIDC 기관 목록을 보려면 참조 - https://openid.net/developers/certified/
+
+외부 OpenID 제공자로의 테스트를 위해 Auth0, https://auth0.com/ 를 사용할 것이다. 자체 인증 서버 대신 Auth0를 사용할 수 있도록, 다음 사항을 체크해보자.
+
+> - Auth0에서 리더 및 라이터 클라이언트와 사용자 계정 설정하기
+> - OpenID 제공자로 Auth0를 사용하도록 필요한 변경사항 적용하기
+> - 작동하는지 확인하기 위해 테스트 스크립트 실행하기
+> - 다음의 인증 흐름을 이용해 액세스 토큰 획득하기:
+    >   - 클라이언트 자격 증명 인증 흐름
+>   - 인가 코드 인증 흐름
+> - 인증 흐름에서 얻은 액세스 토큰을 이용하여 보호된 API 호출하기
+> - 사용자 정보 엔드포인트를 사용하여 사용자에 대한 더 많은 정보 얻기
+
 
 
 
