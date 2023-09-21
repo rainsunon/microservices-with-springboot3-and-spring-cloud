@@ -98,7 +98,7 @@ spring.cloud.gateway.routes:
   filters:
   - SetPath=/501
 
-spring.security.oauth2.resourceserver.jwt.issuer-uri: https://dev-r8utd4y3vz68zlnd.us.auth0.com/
+spring.security.oauth2.resourceserver.jwt.issuer-uri: http://${app.auth-server}:9999
 
 management.endpoint.gateway.enabled: true
 management.endpoint.health.show-details: "ALWAYS"
