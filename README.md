@@ -11,10 +11,10 @@ https://www.packtpub.com/product/microservices-with-spring-boot-3-and-spring-clo
 - 해결책 - 현재 가용한 마이크로서비스의 IP와 인스턴스를 추적하는 'Service Discovery' 서비스를 등록한다.
 
 - 해결을 위한 요구사항
-    + 자동적으로 마이크로서비스를 등록/해지
-    + 클라이언트는 논리적인 엔드포인트로 요청을 할 수 있어야 함. 요청은 사용가능한 마이크로서비스 인스턴스에 라우팅 되어야 함.
-    + 요청은 가용한 마이크로서비스에 로드밸런싱 되어야 함.
-    + 상태가 건강하지 않은 마이크로서비스를 감지해야 하며 이런 인스턴스에는 요청이 라우팅되지 않아야 함.
+  + 자동적으로 마이크로서비스를 등록/해지
+  + 클라이언트는 논리적인 엔드포인트로 요청을 할 수 있어야 함. 요청은 사용가능한 마이크로서비스 인스턴스에 라우팅 되어야 함.
+  + 요청은 가용한 마이크로서비스에 로드밸런싱 되어야 함.
+  + 상태가 건강하지 않은 마이크로서비스를 감지해야 하며 이런 인스턴스에는 요청이 라우팅되지 않아야 함.
 
 
 ### Edge Server
@@ -93,7 +93,7 @@ https://www.packtpub.com/product/microservices-with-spring-boot-3-and-spring-clo
 
 - 해결책을 위한 요구사항
 > - 표준화된 이름의 헤더와 같은 잘 알려진 위치에서 모든 들어오는 또는 새로운 요청과 이벤트에 고유한 상관 ID를 할당
-마이크로서비스가 외부 요청을 하거나 메시지를 보낼 때, 그것은 반드시 요청과 메시지에 상관 ID를 추가해야 함
+    마이크로서비스가 외부 요청을 하거나 메시지를 보낼 때, 그것은 반드시 요청과 메시지에 상관 ID를 추가해야 함
 > - 모든 로그 이벤트는 사전 정의된 형식으로 상관 ID를 포함해야 하므로 중앙 집중식 로깅 서비스가 로그 이벤트에서 상관 ID를 추출하고 검색 가능하게 만들 수 있음
 > - 요청, 응답, 그리고 메시지가 마이크로서비스 인스턴스에 들어오고 나갈 때 추적 기록을 생성해야 함
 
@@ -122,7 +122,7 @@ https://www.packtpub.com/product/microservices-with-spring-boot-3-and-spring-clo
 
 ![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_15.png)
 
-- 해결을 위한 요구사항  
+- 해결을 위한 요구사항
 
   컨트롤 루프는 시스템 랜드스케이프의 실제 상태를 지속적으로 관찰하고, 운영자가 지정한 원하는 상태와 비교한다. 두 상태가 다르면 실제 상태를 원하는 상태와 동일하게 만들기 위해 행동을 취한다.
 
@@ -166,7 +166,7 @@ Design Pattern|Spring Boot|Spring Cloud|Kubernetes|Istio
 ---
 # Chapter 03
 
-### Skeleton code for product-service 
+### Skeleton code for product-service
 ```
 spring init \
 --boot-version=3.0.4 \
@@ -269,10 +269,10 @@ jar {
 Docker 이미지에서 fat JAR 파일의 최적화되지 않은 패키징을 처리할 때 fat JAR 파일의 콘텐츠를 여러 폴더로 추출할 수 있다.
 기본적으로 Spring Boot는 fat JAR 파일을 추출한 후 다음 폴더를 생성한다.
 
-- dependencies, 모든 종속성을 JAR 파일로 포함  
-- spring-boot-loader, Spring Boot 애플리케이션을 시작하는 방법을 알고 있는 Spring Boot 클래스를 포함  
-- snapshot-dependencies, 만약 있다면 스냅샷 종속성을 포함  
-- application, 애플리케이션 클래스 파일과 리소스를 포함  
+- dependencies, 모든 종속성을 JAR 파일로 포함
+- spring-boot-loader, Spring Boot 애플리케이션을 시작하는 방법을 알고 있는 Spring Boot 클래스를 포함
+- snapshot-dependencies, 만약 있다면 스냅샷 종속성을 포함
+- application, 애플리케이션 클래스 파일과 리소스를 포함
 
 Spring Boot 문서는 위에 나열된 순서대로 각 폴더마다 하나의 Docker 레이어를 생성하는 것을 권장한다.
 JDK 기반 Docker 이미지를 JRE 기반 이미지로 대체하고, fat JAR 파일을 Docker 이미지에서 적절한 레이어로 풀어내는 지시사항을 추가한 Dockerfile은 다음과 같다.
@@ -421,40 +421,40 @@ api:
 product-composite-service/ProductCompositeServiceApplication.java
 ```java
   @Value("${api.common.version}")         String apiVersion;
-  @Value("${api.common.title}")           String apiTitle;
-  @Value("${api.common.description}")     String apiDescription;
-  @Value("${api.common.termsOfService}")  String apiTermsOfService;
-  @Value("${api.common.license}")         String apiLicense;
-  @Value("${api.common.licenseUrl}")      String apiLicenseUrl;
-  @Value("${api.common.externalDocDesc}") String apiExternalDocDesc;
-  @Value("${api.common.externalDocUrl}")  String apiExternalDocUrl;
-  @Value("${api.common.contact.name}")    String apiContactName;
-  @Value("${api.common.contact.url}")     String apiContactUrl;
-  @Value("${api.common.contact.email}")   String apiContactEmail;
+@Value("${api.common.title}")           String apiTitle;
+@Value("${api.common.description}")     String apiDescription;
+@Value("${api.common.termsOfService}")  String apiTermsOfService;
+@Value("${api.common.license}")         String apiLicense;
+@Value("${api.common.licenseUrl}")      String apiLicenseUrl;
+@Value("${api.common.externalDocDesc}") String apiExternalDocDesc;
+@Value("${api.common.externalDocUrl}")  String apiExternalDocUrl;
+@Value("${api.common.contact.name}")    String apiContactName;
+@Value("${api.common.contact.url}")     String apiContactUrl;
+@Value("${api.common.contact.email}")   String apiContactEmail;
 
-  /**
-  * Will exposed on $HOST:$PORT/swagger-ui.html
-  *
-  * @return the common OpenAPI documentation
-  */
-  @Bean
-  public OpenAPI getOpenApiDocumentation() {
-    return new OpenAPI()
-      .info(new Info().title(apiTitle)
+/**
+ * Will exposed on $HOST:$PORT/swagger-ui.html
+ *
+ * @return the common OpenAPI documentation
+ */
+@Bean
+public OpenAPI getOpenApiDocumentation() {
+        return new OpenAPI()
+        .info(new Info().title(apiTitle)
         .description(apiDescription)
         .version(apiVersion)
         .contact(new Contact()
-          .name(apiContactName)
-          .url(apiContactUrl)
-          .email(apiContactEmail))
+        .name(apiContactName)
+        .url(apiContactUrl)
+        .email(apiContactEmail))
         .termsOfService(apiTermsOfService)
         .license(new License()
-          .name(apiLicense)
-          .url(apiLicenseUrl)))
-      .externalDocs(new ExternalDocumentation()
+        .name(apiLicense)
+        .url(apiLicenseUrl)))
+        .externalDocs(new ExternalDocumentation()
         .description(apiExternalDocDesc)
         .url(apiExternalDocUrl));
-  }
+        }
 ```
 
 product-composite-service/ProductCompositeService.java
@@ -469,17 +469,17 @@ public interface ProductCompositeService {
    * @return the composite product info, if found, else null
    */
   @Operation(
-    summary = "${api.product-composite.get-composite-product.description}",
-    description = "${api.product-composite.get-composite-product.notes}")
+          summary = "${api.product-composite.get-composite-product.description}",
+          description = "${api.product-composite.get-composite-product.notes}")
   @ApiResponses(value = {
-    @ApiResponse(responseCode = "200", description = "${api.responseCodes.ok.description}"),
-    @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
-    @ApiResponse(responseCode = "404", description = "${api.responseCodes.notFound.description}"),
-    @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
+          @ApiResponse(responseCode = "200", description = "${api.responseCodes.ok.description}"),
+          @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
+          @ApiResponse(responseCode = "404", description = "${api.responseCodes.notFound.description}"),
+          @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
   })
   @GetMapping(
-    value = "/product-composite/{productId}",
-    produces = "application/json")
+          value = "/product-composite/{productId}",
+          produces = "application/json")
   ProductAggregate getProduct(@PathVariable int productId);
 }
 ```
@@ -500,7 +500,7 @@ curl -X GET "http://localhost:8080/product-composite/123" -H "accept: applicatio
 
 ## Adding Persistence
 
-#### Product, Recommendation - Spring Data for MongoDB  
+#### Product, Recommendation - Spring Data for MongoDB
 #### Review - Spring Data for the JPA to access a MySQL database
 
 - 핵심 마이크로서비스에 영속성 레이어 추가하기
@@ -565,7 +565,7 @@ spring:
 ```
 
 ### 수동 테스트 Manual tests of the new APIs and the persistence layer
-    
+
 ```shell
 ./gradlew build && docker-compose build && docker-compose up
 # http://localhost:8080/openapi/webjars/swagger-ui/index.html 접속
@@ -595,7 +595,7 @@ docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
 
 
 ### Blocking code 다루기
-리뷰 서비스의 경우, 관계형 데이터베이스에서 데이터에 접근하기 위해 JPA를 사용하는데, 이는 비차단 프로그래밍 모델을 지원하지 않는다. 대신에, blocking 코드를 실행하는 데 능한 스케줄러를 사용하여 한정된 수의 스레드가 있는 전용 스레드 풀에서 blocking 코드를 실행할 수 있다. blocking 코드에 대해 스레드 풀을 사용하면 마이크로서비스에서 사용 가능한 스레드가 소진되는 것을 방지하고, 만약 있다면 마이크로서비스 내의 동시 non-blocking 처리에 영향을 주지 않게 한다.  
+리뷰 서비스의 경우, 관계형 데이터베이스에서 데이터에 접근하기 위해 JPA를 사용하는데, 이는 비차단 프로그래밍 모델을 지원하지 않는다. 대신에, blocking 코드를 실행하는 데 능한 스케줄러를 사용하여 한정된 수의 스레드가 있는 전용 스레드 풀에서 blocking 코드를 실행할 수 있다. blocking 코드에 대해 스레드 풀을 사용하면 마이크로서비스에서 사용 가능한 스레드가 소진되는 것을 방지하고, 만약 있다면 마이크로서비스 내의 동시 non-blocking 처리에 영향을 주지 않게 한다.
 
 1. 스케쥴러 빈을 등록한다.
 ```java
@@ -764,7 +764,7 @@ spring.cloud.stream:
 ```
 
 > - Spring Cloud Stream은 기본적으로 함수에 구성을 바인딩하기 위한 명명 규칙을 적용한다. 함수로 전송된 메시지의 경우, 바인딩 이름은 <함수이름>-in-<인덱스> 이다:
->   + 함수이름은 앞서 예에서의 함수, messageProcessor의 이름이다.
+    >   + 함수이름은 앞서 예에서의 함수, messageProcessor의 이름이다.
 >   + 인덱스는 함수가 여러 입력 또는 출력 인수를 필요로 하는 경우를 제외하고는 0으로 설정된다. 우리는 다중 인수 함수를 사용하지 않으므로, 예제에서 인덱스는 항상 0으로 설정된다.
 >   + 나가는 메시지의 경우, 바인딩 이름 규칙은 <함수이름>-out-<인덱스>이다.
 > - destination 속성은 메시지가 소비될 토픽의 이름을 지정하며, 이 경우에는 products이다.
@@ -842,7 +842,7 @@ spring.cloud.stream.bindings.messageProcessor-in-0:
 #### *Gradle 빌드 파일 변경*
 
 #### *core 서비스에서의 이벤트 소비*
-애플리케이션에 이러한 변경을 적용하기 위해 다음 단계를 수행해야 한다:  
+애플리케이션에 이러한 변경을 적용하기 위해 다음 단계를 수행해야 한다:
 
 > - 핵심 서비스의 토픽에 게시된 이벤트를 소비하는 메시지 프로세서 선언: 이 프로세서는 특정 토픽에서 발행된 메시지를 소비하고 해당 메시지에 따라 적절한 작업을 수행한다.
 > - 서비스 구현체가 반응형 영속성 계층을 사용하도록 변경: 기존의 동기식 데이터 처리 방식 대신, 비동기식 및 반응형 데이터 처리를 지원하는 영속성 계층을 사용하도록 코드를 수정한다.
@@ -1392,7 +1392,7 @@ eureka:
     fetchRegistry: false
     serviceUrl:
       defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
- 
+
   server:
     waitTimeInMsWhenSyncEmpty: 0
     response-cache-update-interval-ms: 5000
@@ -1471,8 +1471,8 @@ docker-compose up -d --scale review=2
 ```
 
 2. 리뷰 인스턴스가 종료된 후에는 API 호출이 실패할 수 있는 짧은 시간이 있다. 이는 사라진 인스턴스에 대한 정보가 클라이언트인 product-composite 서비스로 전파되는 데 걸리는 시간 때문이다.
-이 시간 동안, 클라이언트 측 로드 밸런서는 더 이상 존재하지 않는 인스턴스를 선택할 수 있다. 이러한 현상을 방지하기 위해, 타임아웃과 재시도와 같은 복원력 메커니즘을 사용할 수 있다.
-후에 'Resilience4j를 사용하여 복원력 향상'에서 이를 어떻게 적용하는지 알아볼 것이다. 지금은 curl 명령에 타임아웃을 지정한다. -m 2 옵션을 사용하여 응답을 기다리는 시간이 2초를 초과하지 않도록 한다.
+   이 시간 동안, 클라이언트 측 로드 밸런서는 더 이상 존재하지 않는 인스턴스를 선택할 수 있다. 이러한 현상을 방지하기 위해, 타임아웃과 재시도와 같은 복원력 메커니즘을 사용할 수 있다.
+   후에 'Resilience4j를 사용하여 복원력 향상'에서 이를 어떻게 적용하는지 알아볼 것이다. 지금은 curl 명령에 타임아웃을 지정한다. -m 2 옵션을 사용하여 응답을 기다리는 시간이 2초를 초과하지 않도록 한다.
 ```shell
 curl localhost:8080/product-composite/1 -m 2
 ```
@@ -1655,7 +1655,7 @@ logging:
 라우팅 규칙 설정은 두 가지 방법으로 수행할 수 있다: 프로그래밍 방식으로 Java DSL을 사용하거나 Configuration을 통해 수행할 수 있다.
 데이터베이스와 같은 외부 저장소에 규칙이 저장되어 있거나, 예를 들어 RESTful API 또는 게이트웨이로 보내는 메시지를 통해 런타임에 제공되는 경우, Java DSL을 사용하여 프로그래밍 방식으로 라우팅 규칙을 설정하는 것이 유용할 수 있다.
 보다 정적인 사용 사례에서는, Configuration 파일인 src/main/resources/application.yml에 경로를 선언하는 것이 더 편리할 수 있다.
-라우팅 규칙을 Java 코드에서 분리하면 마이크로서비스의 새 버전을 배포하지 않고도 라우팅 규칙을 업데이트할 수 있는 가능성이 생긴다.  
+라우팅 규칙을 Java 코드에서 분리하면 마이크로서비스의 새 버전을 배포하지 않고도 라우팅 규칙을 업데이트할 수 있는 가능성이 생긴다.
 
 라우팅은 다음과 같이 정의된다.
 
@@ -1668,10 +1668,10 @@ logging:
 
 ```yaml
 spring.cloud.gateway.routes:
-- id: product-composite
-  uri: lb://product-composite
-  predicates:
-  - Path=/product-composite/**
+  - id: product-composite
+    uri: lb://product-composite
+    predicates:
+      - Path=/product-composite/**
 ```
 
 상기 코드의 눈 여겨볼 포인트.
@@ -1693,7 +1693,7 @@ spring.cloud.gateway.routes:
 
 
 > - Swagger UI가 엣지 서버 뒤에 위치할 때, 이는 올바른 서버 URL을 포함하는 API의 OpenAPI 명세를 표시해야 한다. 즉, product-composite 서비스 자체의 URL이 아닌 엣지 서버의 URL을 표시해야 한다.  
-product-composite 서비스가 OpenAPI 명세에서 올바른 서버 URL을 생성할 수 있도록 하기 위해, 다음과 같은 구성이 product-composite 서비스에 추가되었다.
+    product-composite 서비스가 OpenAPI 명세에서 올바른 서버 URL을 생성할 수 있도록 하기 위해, 다음과 같은 구성이 product-composite 서비스에 추가되었다.
 ```yaml
 server.forward-headers-strategy: framework
 ```
@@ -1767,7 +1767,7 @@ http://httpstat.us/${CODE} 를 호출하면 간단하게 ${CODE}에 넣은 HTTP 
 
 > - Docker 엔진에서 실행되는 시스템 랜드스케이프 외부에 엣지 서버가 무엇을 노출하는지 테스트한다.
 > - 다음과 같은 가장 자주 사용되는 라우팅 규칙 중 일부를 테스트한다.
->   - 엣지 서버를 통해 API를 호출하기 위한 URL 기반 라우팅 사용
+    >   - 엣지 서버를 통해 API를 호출하기 위한 URL 기반 라우팅 사용
 >   - 엣지 서버를 통해 Swagger UI를 호출하기 위한 URL 기반 라우팅 사용
 >   - API와 웹 기반 UI 모두를 사용하여 Netflix Eureka를 호출하기 위한 URL 기반의 라우팅 사용
 >   - 요청의 호스트명에 따라 요청을 어떻게 라우팅할 수 있는지 보기 위해 헤더 기반의 라우팅 사용
@@ -1780,7 +1780,7 @@ docker-compose ps gateway eureka product-composite product recommendation review
 ```
 
 2. 다음과 같은 결과를 볼 수 있는데 엣지 서버(Spring Cloud Gateway)만이 8080 포트를 도커엔진 외부로 노출시키고 있음을 알 수 있다.
-![](./images/img_6.png)
+   ![](./images/img_6.png)
 
 3. 엣지서버에 셋팅된 라우팅 정보를 알고 싶다면 `/actuator/gateway/routes` 를 호출하면 된다. 필요한 정보만 보기 위해 jq 필터를 쓴다.
 ```shell
@@ -1811,7 +1811,7 @@ LoadBalancerClientFilter url chosen: http://c46dfcbef421:8080/product-composite/
 ```
 
 5. 로그 출력에서 우리는 Configuration에서 지정한 predicate에 기반한 패턴 매칭을 볼 수 있고, 디스커버리 서버의 사용 가능한 인스턴스 중에서 엣지 서버가 어떤 마이크로서비스 인스턴스를 선택했는지 볼 수 있다.
-이 경우, 그것은 요청을 http://c46dfcbef421:8080/product-composite/1로 전달합니다. 이는 product-composite 서비스의 instanceId이자 Docker Container ID가 호스트네임이 되었다.
+   이 경우, 그것은 요청을 http://c46dfcbef421:8080/product-composite/1로 전달합니다. 이는 product-composite 서비스의 instanceId이자 Docker Container ID가 호스트네임이 되었다.
 
 ### Swagger UI 호출
 http://localhost:8080/openapi/swagger-ui.html 로 접속하면 Swagger UI를 확인할 수 있다.
@@ -1896,16 +1896,16 @@ keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12
 ```
 
 > - 소스코드 안에 인증서가 포함되어 있으므로 직접 생성할 필요 없음. gateway 프로젝트 내 src/main/resources/keystore/edge.p12 참고.
-> - 이는 인증서가 빌드 타이밍에 .jar 파일 내에 위치한다는 것을 의미하며 런타임시엔 클래스패스 상 keystore/edge.p12 에 위치한다.  
+> - 이는 인증서가 빌드 타이밍에 .jar 파일 내에 위치한다는 것을 의미하며 런타임시엔 클래스패스 상 keystore/edge.p12 에 위치한다.
 
 HTTPS와 인증서를 사용하기 위해 엣지서버를 설정한다. gateway 프로젝트의 application.yml 파일을 수정한다.
 ```yaml
 server.port: 8443
 server.ssl:
- key-store-type: PKCS12
- key-store: classpath:keystore/edge.p12
- key-store-password: password
- key-alias: localhost
+  key-store-type: PKCS12
+  key-store: classpath:keystore/edge.p12
+  key-store-password: password
+  key-alias: localhost
 ```
 
 #### 자가 서명 인증서 대체
@@ -1955,7 +1955,7 @@ implementation 'org.springframework.boot:spring-boot-starter-security'
 ```
 
 2. SecurityConfig 클래스 추가
- - 유저 정의
+- 유저 정의
 ```java
 @Bean
 public InMemoryUserDetailsManager userDetailsService() {
@@ -2133,11 +2133,11 @@ public class SecurityConfig {
 
 > - JWT로 인코딩된 액세스 토큰으로부터 관련 부분을 기록하기 위해 logAuthorizationInfo() 메소드가 API 호출 시마다 추가되었다. 액세스 토큰은 표준 Spring Security SecurityContext를 사용하여 얻을 수 있으며, 리액티브 환경에서는 정적 도우미 메소드인 ReactiveSecurityContextHolder.getContext()를 사용하여 얻을 수 있다. 자세한 내용은 ProductCompositeServiceImpl 클래스를 참조.
 > - Spring 기반 통합 테스트를 실행할 때 OAuth 사용이 비활성화되었습니다. 통합 테스트를 실행할 때 OAuth 메커니즘이 작동하지 않도록 하기 위해 다음과 같이 비활성화합니다:
->   - 테스트 중에 사용할 TestSecurityConfig라는 보안 구성이 추가되었습니다. 이 구성은 모든 리소스에 대한 액세스를 허용합니다.  
+    >   - 테스트 중에 사용할 TestSecurityConfig라는 보안 구성이 추가되었습니다. 이 구성은 모든 리소스에 대한 액세스를 허용합니다.
 ```java
 http.csrf().disable().authorizeExchange().anyExchange().permitAll();
 ```
-> - - 각 Spring 통합 테스트 클래스에서는 다음과 같이 기존의 보안 구성을 무시하고 TestSecurityConfig를 구성한다.  
+> - - 각 Spring 통합 테스트 클래스에서는 다음과 같이 기존의 보안 구성을 무시하고 TestSecurityConfig를 구성한다.
 
 ```java
 @SpringBootTest( 
@@ -2285,7 +2285,7 @@ curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=c
 이 안전한 교환에서 서버는 신원을 확인하기 위해 client secret을 제공해야 한다. 다음 단계를 수행하여 인증 코드 그랜트 플로우를 실행하라.
 
 1. reader 클라이언트를 위한 인가 코드를 얻기 위해 다음 URL을 실행한다.  
-`https://localhost:8443/oauth2/authorize?response_type=code&client_id=reader&redirect_uri=https://my.redirect.uri&scope=product:read&state=35725`
+   `https://localhost:8443/oauth2/authorize?response_type=code&client_id=reader&redirect_uri=https://my.redirect.uri&scope=product:read&state=35725`
 2. 접속을 위한 username u, password p를 입력한다.
 3. reader 클라이언트 승낙을 요구받게 되면 체크 후 승낙한다.
 4. `Submit Consent` 버튼을 누르면 `ERR_NAME_NOT_RESOLVED` 화면을 보게 된다.
@@ -2415,9 +2415,237 @@ content-length: 0
 > - 작동하는지 확인하기 위해 테스트 스크립트 실행하기
 > - 다음의 인증 흐름을 이용해 액세스 토큰 획득하기:
     >   - 클라이언트 자격 증명 인증 흐름
->   - 인가 코드 인증 흐름
+    >   - 인가 코드 인증 흐름
 > - 인증 흐름에서 얻은 액세스 토큰을 이용하여 보호된 API 호출하기
 > - 사용자 정보 엔드포인트를 사용하여 사용자에 대한 더 많은 정보 얻기
+
+
+### OAuth0를 위한 설정
+
+Auth0에서 필요한 대부분의 설정은 Auth0의 관리 API를 사용하는 스크립트에 의해 처리된다. 하지만 관리 API에 접근할 수 있는 클라이언트 ID와 클라이언트 비밀번호를 Auth0가 생성할 때까지 몇 가지 작업을 해야한다.
+Auth0의 서비스는 멀티 테넌트로, 우리가 클라이언트, 리소스 소유자, 리소스 서버와 같은 OAuth 객체의 도메인을 생성할 수 있게 한다.
+Auth0에서 무료 계정에 가입하고 관리 API에 접근할 수 있는 클라이언트를 생성하기 위해 다음의 작업을 수행하라.
+
+1. `https://auth0.com` 접속 후 회원가입
+- 가입 후, 테넌트 도메인을 생성하라는 요청이 나온다. 선택한 테넌트의 이름을 입력한다. 예를 들어: dev-ml-3rd.eu.auth0.com.
+- 요청된대로 계정 정보를 작성.
+- 또한, 'Please Verify Your Auth0 Account'라는 제목의 이메일이 메일함에 있으면 그 안의 지시사항을 따라 계정을 인증.
+2. 가입 후, 온보딩 페이지로 이동된다.
+3. 왼쪽 메뉴에서 'Applications'를 클릭하여 확장하고, 관리 API인 'Auth0 Management API'를 찾기 위해 'APIs'를 클릭. 이 API는 테넌트 생성 중에 자동으로 만들어진다. 이 API를 사용하여 테넌트 내 필요한 정의들을 생성할 것이다.
+4. Auth0 Management API를 클릭하고 Test 탭을 선택.
+5. 'Create & Authorize Test'라는 글자가 크게 적힌 버튼이 표시된다. 관리 API에 접근할 수 있는 클라이언트 생성을 위해 이 버튼을 클릭.
+6. 생성되면, 'Asking Auth0 for tokens from my application.'이란 제목의 페이지가 표시된다. 마지막 단계로서, 우리는 생성된 클라이언트에게 관리 APIs 사용 권한을 부여해야 한다.
+7. Test 탭 옆에 있는 Machine to Machine Applications 탭을 클릭.
+8. 여기서 우리는 테스트 클라이언트인 Auth0 Management API (Test Application)를 찾아볼 수 있고, 그것에 관리 API 사용 권한이 부여된 것으로 표시된다. Authorized toggle button 옆의 아래 화살표를 누르면 많은 수의 사용 가능한 권한들이 나타난다.
+9. All 선택 사항을 누르고 Update 버튼도 누른다. 테넌트 내 모든 관리 API에 접근 권한을 가진 매우 강력한 클라이언트를 이제 보유하게 되었음을 이해한 후 'Continue' 버튼을 클릭.
+10. 이제 생성된 클라이언트의 클라이언트 ID와 클라이언트 비밀번호를 수집하기만 하면 된다. 왼쪽 메뉴에서 'Applications'을 선택하고 (메인 메뉴 항목 'Applications' 아래에 있음) 그 다음에 'Auth0 Management API (Test Application)'라는 이름의 애플리케이션을 선택.
+11. `auth0/env.bash` 파일을 열고 위의 화면에서 다음 값들을 복사.
+- Domain 값을 TENANT 변수의 값으로 설정.
+- Client ID를 MGM_CLIENT_ID 변수의 값으로 설정.
+- Client Secret을 MGM_CLIENT_SECRET 변수의 값으로 설정.
+- ???: USERNAME, PASSWORD 설정 안함
+
+> 이런 식으로 사용자의 비밀번호를 지정하는 것은 보안 측면에서 좋은 방법은 아니다. Auth0는 사용자가 스스로 비밀번호를 설정할 수 있는 사용자 등록을 지원하지만, 설정하는 데 더 많은 작업이 필요하다. 자세한 정보는 https://auth0.com/docs/connections/database/password-change 를 참조. 이것은 테스트 목적으로만 사용되므로 이렇게 비밀번호를 지정하는 것도 괜찮다.
+
+다음 정의들을 생성할 스크립트를 기동시킬 수 있다.
+
+> - 두 개의 애플리케이션, reader와 writer 또는 OAuth 용어로는 클라이언트.
+> - OAuth 용어로는 리소스 서버인 product-composite API, OAuth 범위인 product:read 및 product:write가 있다.
+> - 우리가 인증 코드 부여 흐름을 테스트하는데 사용할 OAuth 용어로 리소스 소유자인 사용자.
+> - 마지막으로, reader 애플리케이션에 product:read 스코프를 부여하고, writer 애플리케이션에는 product:read 및 product:write 스코프를 부여할 것이다.
+
+1. 다음 커맨드를 실행하라.
+```shell
+cd auth0
+./setup-tenant.bash
+```
+결과:
+```shell
+Auth0 - OAuth2 settings:
+
+export TENANT=dev-r8utd4y3vz68zlnd.us.auth0.com
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+export READER_CLIENT_ID=...
+export READER_CLIENT_SECRET=...
+```
+
+2. 이후 테스트에 사용하기 위해 export 커맨드를 카피해두자.
+3. 테스트 사용자에게 지정된 이메일을 확인하라. 'Verify your email.'라는 제목의 메일을 받게 될 것이다. 이메일에 있는 지침을 사용하여 테스트 사용자의 이메일 주소를 인증하라.
+
+> `Note` 상기 스크립트는 몇 번을 실행하더라도 똑같은 결과가 나온다.
+
+> `setup-tenant.bash`를 통해 생성한 오브젝트를 지우고 싶다면 `reset-tenant.bash`를 사용하라.
+
+#### OAuth 2.0 리소스 서버 설정 변경
+
+이미 설명했듯이, OpenID Connect 제공자를 사용할 때 OAuth 리소스 서버에서 표준화된 디스커버리 엔드포인트에 대한 base URI만 구성하면 된다.
+product-composite 프로젝트와 gateway 프로젝트에서 OIDC 디스커버리 엔드포인트를 로컬 인증 서버가 아닌 Auth0를 가리키도록 수정한다. 두 프로젝트의 application.yml 파일에 다음을 변경하자.
+
+1. `spring.security.oauth2.resourceserver.jwt.issuer-uri` 프로퍼티를 찾는다.
+2. 그 값을 https://${TENANT}/로 바꾼다. 여기서 ${TENANT}는 자신의 테넌트 도메인 이름으로 대체되어야 한다. 제 경우에는 dev-ml.eu.auth0.com입니다. 마지막의 /를 잊지 말라.
+
+ex) `spring.security.oauth2.resourceserver.jwt.issuer-uri: https://dev-r8utd4y3vz68zlnd.us.auth0.com/`
+
+product-composite와 gateway 프로젝트를 다시 빌드하고 실행한다.
+```shell
+./gradlew build && docker-compose up -d --build product-composite gateway
+```
+
+#### Auth0으로부터 액세스 토큰을 얻기 위한 테스트 스크립트 `test-em-all.bash` 수정
+
+1. 다음 커맨드를 찾는다.
+```shell
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+```
+
+2. 다음 커맨드로 대체한다.
+```shell
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read+product:write \
+  -d client_id=$WRITER_CLIENT_ID \
+  -d client_secret=$WRITER_CLIENT_SECRET -s | jq -r .access_token)
+```
+
+> `Tip` 상기 커맨드에서 Auth0는 요청된 액세스 토큰의 예상 수신자(audience)를 지정하도록 요구한다. 이는 추가적인 보안 계층이다. audience는 우리가 액세스 토큰을 사용하여 호출하려는 API다. API 구현이 audience 필드를 검증한다면, 이것은 누군가가 다른 목적으로 발행된 액세스 토큰을 사용하여 API에 접근하려고 시도하는 상황을 방지할 것이다.
+
+3. 앞서 언급한 명령에서 환경 변수 TENANT, WRITER_CLIENT_ID, WRITER_CLIENT_SECRET의 값을 setup-tenant.bash 스크립트에서 반환된 값으로 설정하라.
+
+4. 다음 커맨드를 찾는다.
+```shell
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .access_token -r)
+```
+
+5. 다음 커맨드로 대체한다.
+```shell
+export READER_CLIENT_ID=...
+export READER_CLIENT_SECRET=...
+READER_ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read \
+  -d client_id=$READER_CLIENT_ID \
+  -d client_secret=$READER_CLIENT_SECRET -s | jq -r .access_token)
+```
+
+6. 상기 커맨드에서 환경 변수 READER_CLIENT_ID와 READER_CLIENT_SECRET의 값을 setup-tenant.bash 스크립트에서 반환된 값으로 설정한다.
+
+이제 액세스 토큰은 로컬 인증 서버가 아닌 Auth0에서 발행되며, API 구현체는 application.yml 파일에 구성된 Auth0의 디스커버리 서비스로부터 정보를 사용하여 액세스 토큰을 검증할 수 있다.
+API 구현체는 이전과 같이 액세스 토큰의 스코프를 사용하여 클라이언트가 API 호출을 수행할 권한을 부여하거나 부여하지 않을 수 있습니다.
+이렇게 하면 필요한 모든 변경 사항이 적용됩니다. Auth0에서 액세스 토큰을 얻을 수 있는지 확인하기 위해 몇 가지 테스트를 실행해 봅시다.
+
+
+### Auth0를 OpenID Connect 제공자로 사용하여 테스트 스크립트 실행 (Running the test script with Auth0 as the OpenID Connect provider)
+
+```shell
+docker-compose build
+./test-em-all.bash start
+docker-compose logs product-composite | grep "Authorization info"
+```
+
+1. `product:read`와 `product:write` 스코프를 통해 얻은 결과
+```shell
+s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: ...@clients, scopes: product:read product:write, expires 2023-09-22T02:00:00Z: issuer: https://dev-r8utd4y3vz68zlnd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+```
+2. `product:read` 스코프를 통해 얻은 결과
+```shell
+s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: ...@clients, scopes: product:read, expires 2023-09-22T02:00:05Z: issuer: https://dev-r8utd4y3vz68zlnd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+```
+
+#### Auth0을 통해 직접 액세스 토큰을 얻고 싶은 경우
+
+`setup-tenant.bash`를 통해 얻은 WRITER_CLIENT_ID, WRITER_CLIENT_SECRET을 환경변수에 설정하고 다음 커맨드를 실행하면 액세스 토큰을 얻을 수 있다.
+```shell
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read+product:write \
+  -d client_id=$WRITER_CLIENT_ID \
+  -d client_secret=$WRITER_CLIENT_SECRET
+```
+
+#### 인가 코드 그랜트 플로우를 통해 액세스 토큰을 얻고 싶은 경우
+1. 인카 코드를 얻기 위해서 아래의 주소를 웹 브라우저에 입력한다.
+   `https://${TENANT}/authorize?audience=https://localhost:8443/product-composite&scope=openid email product:read product:write&response_type=code&client_id=${WRITER_CLIENT_ID}&redirect_uri=https://my.redirect.uri&state=845361`
+
+2. ${TENANT}와 ${WRITER_CLIENT_ID}는 setup-tenant.bash 스크립트에서 반환된 값으로 대체한다.
+3. Auth0의 로그인 스크린이 표시된다. 사용자 이름과 비밀번호를 입력하고 로그인한다.
+4. 로그인 성공 시, Auto0는 클라이언트 어플리케이션 승인을 묻는다.
+
+![](./images/img_9.png)
+
+5. 승인시 지정했던 리다이렉트 URI로 code 파라미터와 함께 연결된다.
+```text
+https://my.redirect.uri/?code=qt7DGgvrH6W1...&state=845361
+```
+
+6. code 값을 추출하여 다음 커맨드를 실행한다.
+```shell
+CODE=...
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+ -d grant_type=authorization_code \
+ -d client_id=$WRITER_CLIENT_ID \
+ -d client_secret=$WRITER_CLIENT_SECRET  \
+ -d code=$CODE \
+ -d redirect_uri=https://my.redirect.uri -s | jq .
+```
+결과:
+```shell
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsIm...",
+  "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6...",
+  "scope": "openid email product:read product:write",
+  "expires_in": 86400,
+  "token_type": "Bearer"
+}
+```
+
+### Auth0 액세스 토큰을 통한 보호된 API 호출
+
+Readonly API 호출
+```shell
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+
+Update API 호출
+```shell
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i 
+```
+
+### 사용자 정보 엔드포인트를 사용하여 사용자에 대한 더 많은 정보 얻기
+
+```shell
+Export TENANT=...
+curl -H "Authorization: Bearer $ACCESS_TOKEN" https://$TENANT/userinfo -s | jq
+```
+결과:
+```shell
+{
+  "sub": "auth0|...",
+  "email": "tintachina84@gmail.com",
+  "email_verified": true
+}
+```
+
+> `Tip` 상기 엔드포인트는 사용자가 Auth0의 액세스 토큰이 취소되지 않았는지 검증하는데 쓰일 수도 있다.
+
+#### 테스트 종료
+```shell
+docker-compose down
+```
 
 
 
