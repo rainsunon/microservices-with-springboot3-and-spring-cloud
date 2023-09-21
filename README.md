@@ -2420,6 +2420,234 @@ content-length: 0
 > - 사용자 정보 엔드포인트를 사용하여 사용자에 대한 더 많은 정보 얻기
 
 
+### OAuth0를 위한 설정
+
+Auth0에서 필요한 대부분의 설정은 Auth0의 관리 API를 사용하는 스크립트에 의해 처리된다. 하지만 관리 API에 접근할 수 있는 클라이언트 ID와 클라이언트 비밀번호를 Auth0가 생성할 때까지 몇 가지 작업을 해야한다.
+Auth0의 서비스는 멀티 테넌트로, 우리가 클라이언트, 리소스 소유자, 리소스 서버와 같은 OAuth 객체의 도메인을 생성할 수 있게 한다.
+Auth0에서 무료 계정에 가입하고 관리 API에 접근할 수 있는 클라이언트를 생성하기 위해 다음의 작업을 수행하라.
+
+1. `https://auth0.com` 접속 후 회원가입
+  - 가입 후, 테넌트 도메인을 생성하라는 요청이 나온다. 선택한 테넌트의 이름을 입력한다. 예를 들어: dev-ml-3rd.eu.auth0.com.
+  - 요청된대로 계정 정보를 작성.
+  - 또한, 'Please Verify Your Auth0 Account'라는 제목의 이메일이 메일함에 있으면 그 안의 지시사항을 따라 계정을 인증.
+2. 가입 후, 온보딩 페이지로 이동된다.
+3. 왼쪽 메뉴에서 'Applications'를 클릭하여 확장하고, 관리 API인 'Auth0 Management API'를 찾기 위해 'APIs'를 클릭. 이 API는 테넌트 생성 중에 자동으로 만들어진다. 이 API를 사용하여 테넌트 내 필요한 정의들을 생성할 것이다.
+4. Auth0 Management API를 클릭하고 Test 탭을 선택.
+5. 'Create & Authorize Test'라는 글자가 크게 적힌 버튼이 표시된다. 관리 API에 접근할 수 있는 클라이언트 생성을 위해 이 버튼을 클릭.
+6. 생성되면, 'Asking Auth0 for tokens from my application.'이란 제목의 페이지가 표시된다. 마지막 단계로서, 우리는 생성된 클라이언트에게 관리 APIs 사용 권한을 부여해야 한다.
+7. Test 탭 옆에 있는 Machine to Machine Applications 탭을 클릭.
+8. 여기서 우리는 테스트 클라이언트인 Auth0 Management API (Test Application)를 찾아볼 수 있고, 그것에 관리 API 사용 권한이 부여된 것으로 표시된다. Authorized toggle button 옆의 아래 화살표를 누르면 많은 수의 사용 가능한 권한들이 나타난다.
+9. All 선택 사항을 누르고 Update 버튼도 누른다. 테넌트 내 모든 관리 API에 접근 권한을 가진 매우 강력한 클라이언트를 이제 보유하게 되었음을 이해한 후 'Continue' 버튼을 클릭.
+10. 이제 생성된 클라이언트의 클라이언트 ID와 클라이언트 비밀번호를 수집하기만 하면 된다. 왼쪽 메뉴에서 'Applications'을 선택하고 (메인 메뉴 항목 'Applications' 아래에 있음) 그 다음에 'Auth0 Management API (Test Application)'라는 이름의 애플리케이션을 선택.
+11. `auth0/env.bash` 파일을 열고 위의 화면에서 다음 값들을 복사.
+  - Domain 값을 TENANT 변수의 값으로 설정.
+  - Client ID를 MGM_CLIENT_ID 변수의 값으로 설정.
+  - Client Secret을 MGM_CLIENT_SECRET 변수의 값으로 설정.
+  - ???: USERNAME, PASSWORD 설정 안함
+
+> 이런 식으로 사용자의 비밀번호를 지정하는 것은 보안 측면에서 좋은 방법은 아니다. Auth0는 사용자가 스스로 비밀번호를 설정할 수 있는 사용자 등록을 지원하지만, 설정하는 데 더 많은 작업이 필요하다. 자세한 정보는 https://auth0.com/docs/connections/database/password-change 를 참조. 이것은 테스트 목적으로만 사용되므로 이렇게 비밀번호를 지정하는 것도 괜찮다.
+
+다음 정의들을 생성할 스크립트를 기동시킬 수 있다.
+
+> - 두 개의 애플리케이션, reader와 writer 또는 OAuth 용어로는 클라이언트.
+> - OAuth 용어로는 리소스 서버인 product-composite API, OAuth 범위인 product:read 및 product:write가 있다.
+> - 우리가 인증 코드 부여 흐름을 테스트하는데 사용할 OAuth 용어로 리소스 소유자인 사용자.
+> - 마지막으로, reader 애플리케이션에 product:read 스코프를 부여하고, writer 애플리케이션에는 product:read 및 product:write 스코프를 부여할 것이다.
+
+1. 다음 커맨드를 실행하라.
+```shell
+cd auth0
+./setup-tenant.bash
+```
+결과:
+```shell
+Auth0 - OAuth2 settings:
+
+export TENANT=dev-r8utd4y3vz68zlnd.us.auth0.com
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+export READER_CLIENT_ID=...
+export READER_CLIENT_SECRET=...
+```
+
+2. 이후 테스트에 사용하기 위해 export 커맨드를 카피해두자.
+3. 테스트 사용자에게 지정된 이메일을 확인하라. 'Verify your email.'라는 제목의 메일을 받게 될 것이다. 이메일에 있는 지침을 사용하여 테스트 사용자의 이메일 주소를 인증하라.
+
+> `Note` 상기 스크립트는 몇 번을 실행하더라도 똑같은 결과가 나온다.
+
+> `setup-tenant.bash`를 통해 생성한 오브젝트를 지우고 싶다면 `reset-tenant.bash`를 사용하라.
+
+#### OAuth 2.0 리소스 서버 설정 변경
+
+이미 설명했듯이, OpenID Connect 제공자를 사용할 때 OAuth 리소스 서버에서 표준화된 디스커버리 엔드포인트에 대한 base URI만 구성하면 된다.
+product-composite 프로젝트와 gateway 프로젝트에서 OIDC 디스커버리 엔드포인트를 로컬 인증 서버가 아닌 Auth0를 가리키도록 수정한다. 두 프로젝트의 application.yml 파일에 다음을 변경하자.
+
+1. `spring.security.oauth2.resourceserver.jwt.issuer-uri` 프로퍼티를 찾는다.
+2. 그 값을 https://${TENANT}/로 바꾼다. 여기서 ${TENANT}는 자신의 테넌트 도메인 이름으로 대체되어야 한다. 제 경우에는 dev-ml.eu.auth0.com입니다. 마지막의 /를 잊지 말라.
+
+ex) `spring.security.oauth2.resourceserver.jwt.issuer-uri: https://dev-r8utd4y3vz68zlnd.us.auth0.com/`
+
+product-composite와 gateway 프로젝트를 다시 빌드하고 실행한다.
+```shell
+./gradlew build && docker-compose up -d --build product-composite gateway
+```
+
+#### Auth0으로부터 액세스 토큰을 얻기 위한 테스트 스크립트 `test-em-all.bash` 수정
+
+1. 다음 커맨드를 찾는다.
+```shell
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+```
+
+2. 다음 커맨드로 대체한다.
+```shell
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read+product:write \
+  -d client_id=$WRITER_CLIENT_ID \
+  -d client_secret=$WRITER_CLIENT_SECRET -s | jq -r .access_token)
+```
+
+> `Tip` 상기 커맨드에서 Auth0는 요청된 액세스 토큰의 예상 수신자(audience)를 지정하도록 요구한다. 이는 추가적인 보안 계층이다. audience는 우리가 액세스 토큰을 사용하여 호출하려는 API다. API 구현이 audience 필드를 검증한다면, 이것은 누군가가 다른 목적으로 발행된 액세스 토큰을 사용하여 API에 접근하려고 시도하는 상황을 방지할 것이다.
+
+3. 앞서 언급한 명령에서 환경 변수 TENANT, WRITER_CLIENT_ID, WRITER_CLIENT_SECRET의 값을 setup-tenant.bash 스크립트에서 반환된 값으로 설정하라.
+
+4. 다음 커맨드를 찾는다.
+```shell
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .access_token -r)
+```
+
+5. 다음 커맨드로 대체한다.
+```shell
+export READER_CLIENT_ID=...
+export READER_CLIENT_SECRET=...
+READER_ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read \
+  -d client_id=$READER_CLIENT_ID \
+  -d client_secret=$READER_CLIENT_SECRET -s | jq -r .access_token)
+```
+
+6. 상기 커맨드에서 환경 변수 READER_CLIENT_ID와 READER_CLIENT_SECRET의 값을 setup-tenant.bash 스크립트에서 반환된 값으로 설정한다.
+
+이제 액세스 토큰은 로컬 인증 서버가 아닌 Auth0에서 발행되며, API 구현체는 application.yml 파일에 구성된 Auth0의 디스커버리 서비스로부터 정보를 사용하여 액세스 토큰을 검증할 수 있다.
+API 구현체는 이전과 같이 액세스 토큰의 스코프를 사용하여 클라이언트가 API 호출을 수행할 권한을 부여하거나 부여하지 않을 수 있습니다.
+이렇게 하면 필요한 모든 변경 사항이 적용됩니다. Auth0에서 액세스 토큰을 얻을 수 있는지 확인하기 위해 몇 가지 테스트를 실행해 봅시다.
+
+
+### Auth0를 OpenID Connect 제공자로 사용하여 테스트 스크립트 실행 (Running the test script with Auth0 as the OpenID Connect provider)
+
+```shell
+docker-compose build
+./test-em-all.bash start
+docker-compose logs product-composite | grep "Authorization info"
+```
+
+1. `product:read`와 `product:write` 스코프를 통해 얻은 결과
+```shell
+s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: ...@clients, scopes: product:read product:write, expires 2023-09-22T02:00:00Z: issuer: https://dev-r8utd4y3vz68zlnd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+```
+2. `product:read` 스코프를 통해 얻은 결과
+```shell
+s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: ...@clients, scopes: product:read, expires 2023-09-22T02:00:05Z: issuer: https://dev-r8utd4y3vz68zlnd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+```
+
+#### Auth0을 통해 직접 액세스 토큰을 얻고 싶은 경우
+
+`setup-tenant.bash`를 통해 얻은 WRITER_CLIENT_ID, WRITER_CLIENT_SECRET을 환경변수에 설정하고 다음 커맨드를 실행하면 액세스 토큰을 얻을 수 있다.
+```shell
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read+product:write \
+  -d client_id=$WRITER_CLIENT_ID \
+  -d client_secret=$WRITER_CLIENT_SECRET
+```
+
+#### 인가 코드 그랜트 플로우를 통해 액세스 토큰을 얻고 싶은 경우
+1. 인카 코드를 얻기 위해서 아래의 주소를 웹 브라우저에 입력한다.
+   `https://${TENANT}/authorize?audience=https://localhost:8443/product-composite&scope=openid email product:read product:write&response_type=code&client_id=${WRITER_CLIENT_ID}&redirect_uri=https://my.redirect.uri&state=845361`
+
+2. ${TENANT}와 ${WRITER_CLIENT_ID}는 setup-tenant.bash 스크립트에서 반환된 값으로 대체한다.
+3. Auth0의 로그인 스크린이 표시된다. 사용자 이름과 비밀번호를 입력하고 로그인한다.
+4. 로그인 성공 시, Auto0는 클라이언트 어플리케이션 승인을 묻는다.
+
+![](./images/img_9.png)
+
+5. 승인시 지정했던 리다이렉트 URI로 code 파라미터와 함께 연결된다.
+```text
+https://my.redirect.uri/?code=qt7DGgvrH6W1...&state=845361
+```
+
+6. code 값을 추출하여 다음 커맨드를 실행한다.
+```shell
+CODE=...
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+ -d grant_type=authorization_code \
+ -d client_id=$WRITER_CLIENT_ID \
+ -d client_secret=$WRITER_CLIENT_SECRET  \
+ -d code=$CODE \
+ -d redirect_uri=https://my.redirect.uri -s | jq .
+```
+결과:
+```shell
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsIm...",
+  "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6...",
+  "scope": "openid email product:read product:write",
+  "expires_in": 86400,
+  "token_type": "Bearer"
+}
+```
+
+### Auth0 액세스 토큰을 통한 보호된 API 호출
+
+Readonly API 호출
+```shell
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+
+Update API 호출
+```shell
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i 
+```
+
+### 사용자 정보 엔드포인트를 사용하여 사용자에 대한 더 많은 정보 얻기
+
+```shell
+Export TENANT=...
+curl -H "Authorization: Bearer $ACCESS_TOKEN" https://$TENANT/userinfo -s | jq
+```
+결과:
+```shell
+{
+  "sub": "auth0|...",
+  "email": "tintachina84@gmail.com",
+  "email_verified": true
+}
+```
+
+> `Tip` 상기 엔드포인트는 사용자가 Auth0의 액세스 토큰이 취소되지 않았는지 검증하는데 쓰일 수도 있다.
+
+#### 테스트 종료
+```shell
+docker-compose down
+```
+
+
 
 
 
