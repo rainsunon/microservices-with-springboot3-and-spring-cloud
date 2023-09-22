@@ -2648,6 +2648,252 @@ docker-compose down
 ```
 
 
+## 설정 중앙화 (Centralized Configuration)
+
+이 장에서는 설정 중앙화를 위해 Spring Cloud Config Server를 사용하는 방법을 설명한다.
+> - Spring Cloud Config Server 소개
+> - Config Server 설정하기
+> - Config Server의 클라이언트 구성하기
+> - 설정 저장소 구조화하기
+> - Spring Cloud Config Server 사용해보기
+
+Spring Cloud Config Server는 여타 마이크로서비스들과 마찬가지로 Edge Server 뒤에 존재한다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_12_01.png)
+
+Config server를 만들 때 다음과 같은 고려사항이 있다.
+> - 설정 저장소에 대한 저장소 유형 선택하기
+> - 초기 클라이언트 연결 방식 결정하기, 설정 서버 또는 디스커버리 서버로의 연결
+> - API에 대한 무단 액세스로부터 설정 보호하기 및 설정 저장소에 민감한 정보를 평문으로 저장하지 않도록 보안 설정
+
+### 설정 저장소에 대한 저장소 유형 선택하기
+
+Config Server는 설정 정보를 저장하기 위해 여러 유형의 저장소를 지원한다. 다음은 그 예이다.
+> - Git repository
+> - Local filesystem
+> - HashiCorp Vault
+> - JDBC database
+
+여기서는 로컬 파일 시스템을 사용할 것이다. 로컬 파일 시스템을 사용하기 위해서는 설정 서버를 Native Spring Profile로 실행해야 한다.  
+설정 저장소의 위치는 spring.cloud.config.server.native.searchLocations 프로퍼티에 지정된다.
+
+### 초기 클라이언트 연결 방식 결정하기
+기본적으로 클라이언트는 설정 정보를 가져오기 위해 먼저 설정 서버에 연결한다. 그런 다음 구성에 따라 Netflix Eureka와 같은 디스커버리 서버에 등록한다. 반대로 진행할 수도 있다.
+즉, 클라이언트가 먼저 디스커버리 서버에 연결하여 설정 서버 인스턴스를 찾고, 그런 다음 설정을 가져오기 위해 설정 서버에 연결하는 방식이다. 양쪽 접근 방식 모두 장단점이 있다.
+여기서는 클라이언트가 먼저 설정 서버에 연결할 것이다. 이 접근 방식을 사용하면 디스커버리 서버의 설정을 설정 서버에 저장할 수 있게 된다.
+
+### 설정 보안 (Securing the configuration)
+
+일반적으로 설정 정보는 민감한 정보로 간주된다. 이는 설정 정보를 전송 및 저장 시에 보호해야 함을 의미한다.
+런타임 관점에서 설정 서버는 엣지 서버를 통해 외부에 노출될 필요가 없다. 그러나 개발 중에는 설정을 확인하기 위해 설정 서버의 API에 액세스할 수 있는 것이 유용하다.
+프로덕션 환경에서는 외부 액세스를 제한하는 것이 권장된다.
+
+#### 설정 정보의 전송 중 보안 강화
+
+설정 정보를 마이크로서비스나 설정 서버의 API를 사용하는 사용자가 요청할 때, 이미 엣지 서버가 HTTPS를 사용하고 있기 때문에 도청으로부터 보호된다.
+API 사용자가 알려진 클라이언트인지 확인하기 위해 HTTP basic authentication을 사용할 것이다. 설정 서버에서 Spring Security를 사용하여 HTTP basic authentication을 설정하고,
+허용된 자격 증명으로 SPRING_SECURITY_USER_NAME 및 SPRING_SECURITY_USER_PASSWORD 환경 변수를 지정함으로써 HTTP basic authentication을 설정할 수 있다.
+
+#### 설정 정보 저장시의 보안 강화
+설정 저장소에 액세스 권한이 있는 사람이 비밀번호와 같은 민감한 정보를 도난할 수 있는 상황을 피하기 위해, 설정 서버는 디스크에 저장될 때 설정 정보의 암호화를 지원한다.
+설정 서버는 대칭 및 비대칭 키 모두를 사용할 수 있습니다. 비대칭 키는 더 안전하지만 관리가 어렵다.
+여기서는 대칭 키를 사용한다. 대칭 키는 환경 변수인 ENCRYPT_KEY를 지정하여 설정 서버에 시작 시 제공된다. 암호화된 키는 민감한 정보와 마찬가지로 보호되어야 하는 일반 문자열이다.
+
+### 설정 서버 API 소개
+
+
+---
+### 설정 서버 구성하기
+1. 스프링부트 스켈레톤 프로젝트 생성
+2. `spring-cloud-config-server`  `spring-boot-starter-security` 의존성 추가
+3. `@EnableConfigServer` 어노테이션 추가
+```java
+@EnableConfigServer
+@SpringBootApplication
+public class ConfigServerApplication {
+```
+
+4. application.yml 에 설정 서버를 위한 설정 추가
+```yaml
+server.port: 8888
+spring.cloud.config.server.native.searchLocations: file:${PWD}/config-repo
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+logging:
+  level:
+    root: info
+---
+spring.config.activate.on-profile: docker
+spring.cloud.config.server.native.searchLocations: file:/config-repo
+```
+
+5. 마이크로서비스 랜드스케이프 외부에서 설정 서버의 API에 접근할 수 있도록 엣지 서버에 라우팅 규칙을 추가한다.
+6. 각각의 Docker Compose 파일에 Dockerfile과 설정 서버 정의를 추가한다.
+7. 민감한 설정 매개변수를 표준 Docker Compose 환경 파일인 .env로 외부화한다.
+8. 공통 빌드 파일 `settings.gradle`에 설정 서버 프로젝트를 추가한다.
+```java
+include ':spring-cloud:config-server'
+```
+
+### 엣지 서버에 라우팅 룰 추가
+```yaml
+ - id: config-server
+   uri: http://${app.config-server}:8888
+  predicates:
+  - Path=/config/**
+  filters:
+  - RewritePath=/config/(?<segment>.*), /$\{segment}
+```
+
+라우팅 규칙의 RewritePath 필터는 들어오는 URL에서 선행 부분인 /config를 제거한 후 설정 서버로 전송한다.
+엣지 서버는 또한 모든 요청을 설정 서버로 허용하도록 구성되어 있으며, 보안 검사를 설정 서버에 위임합니다. 다음 줄은 엣지 서버의 SecurityConfig 클래스에 추가된다.
+```java
+  .pathMatchers("/config/**").permitAll()
+```
+
+이 라우팅 규칙이 적용되면 구성 서버의 API를 사용할 수 있다. 예를 들어, 다음 명령을 실행하여 도커 Spring 프로필을 사용하는 product 서비스의 설정을 요청할 수 있다.
+```shell
+curl https://dev-usr:dev-pwd@localhost:8443/config/product/docker -ks | jq
+```
+
+### 도커 사용을 위한 설정 서버 구성하기
+
+설정 서버의 Dockerfile은 다른 마이크로서비스와 동일하다. 단, 포트 8080 대신 포트 8888을 노출하는 점이 다르다.
+설정 서버를 Docker Compose 파일에 추가하는 방법은 다른 마이크로서비스와 약간 다르다.
+```yaml
+config-server:
+  build: spring-cloud/config-server
+  mem_limit: 512m
+  environment:
+    - SPRING_PROFILES_ACTIVE=docker,native
+    - ENCRYPT_KEY=${CONFIG_SERVER_ENCRYPT_KEY}
+    - SPRING_SECURITY_USER_NAME=${CONFIG_SERVER_USR}
+    - SPRING_SECURITY_USER_PASSWORD=${CONFIG_SERVER_PWD}
+  volumes:
+    - $PWD/config-repo:/config-repo
+```
+
+1. Spring 프로필인 native는 설정 서버에게 설정 저장소가 로컬 파일을 기반으로 한다는 신호로 추가된다.
+2. 환경 변수 ENCRYPT_KEY는 설정 서버가 민감한 구성 정보를 암호화하고 복호화하는 데 사용할 대칭 암호화 키를 지정하는 데 사용된다.
+3. 환경 변수 SPRING_SECURITY_USER_NAME과 SPRING_SECURITY_USER_PASSWORD는 HTTP  basic authentication을 사용하여 API를 보호하는 데 사용할 자격 증명을 지정하는 데 사용된다.
+4. volumes 선언은 /config-repo 경로에서 Docker 컨테이너 내에서 config-repo 폴더에 접근할 수 있도록 한다.
+
+앞서 언급한 세 개의 환경 변수의 값은 Docker Compose 파일에서 ${...}으로 표시되며, Docker Compose는 이 값을 .env 파일에서 가져온다.
+```shell
+CONFIG_SERVER_ENCRYPT_KEY=my-very-secure-encrypt-key
+CONFIG_SERVER_USR=dev-usr
+CONFIG_SERVER_PWD=dev-pwd
+```
+
+> `Tip` .env 파일에 저장된 정보, 즉 사용자 이름, 비밀번호 및 암호화 키는 민감한 정보이므로 개발 및 테스트 외의 용도로 사용될 경우 보호되어야 한다.
+> 또한, 암호화 키를 분실하면 구성 저장소의 암호화된 정보를 복호화할 수 없는 상황이 발생할 수 있음에 유의해야 한다.
+
+
+### 설정 서버 클라이언트 구성하기
+마이크로서비스가 설정 서버에서 설정을 가져올 수 있도록 하려면 마이크로서비스를 업데이트해야 한다. 이를 위해 다음을 수행해야 한다.
+
+1. Gradle 빌드 파일인 build.gradle에 spring-cloud-starter-config 및 spring-retry 종속성을 추가한다.
+2. 술정 파일인 application.yml을 설정 저장소로 이동하고, 프로퍼티 spring.application.name에 지정된 클라이언트 이름으로 이름을 변경한다.
+3. src/main/resources 폴더에 새로운 application.yml 파일을 추가한다. 이 파일은 설정 서버에 연결하기 위해 필요한 설정을 보유할 때 사용된다.
+4. 예를 들어, product 서비스의 경우 Docker Compose 파일에 설정 서버에 액세스하는 데 사용되는 자격 증명을 추가한다.
+
+```yaml
+product:
+  environment:
+    - CONFIG_SERVER_USR=${CONFIG_SERVER_USR}
+    - CONFIG_SERVER_PWD=${CONFIG_SERVER_PWD}
+```
+
+5. Spring Boot 기반 자동화된 테스트 실행 시 설정 서버 사용을 비활성화하려면 @DataMongoTest, @DataJpaTest, @SpringBootTest 어노테이션에 spring.cloud.config.enabled=false를 추가한다.
+
+```java
+@DataMongoTest(properties = {"spring.cloud.config.enabled=false"})
+@DataJpaTest(properties = {"spring.cloud.config.enabled=false"})
+@SpringBootTest(webEnvironment=RANDOM_PORT, properties = {"eureka.client.enabled=false", "spring.cloud.config.enabled=false"})
+```
+
+### 연결 정보 구성하기
+src/main/resources/application.yml 파일은 이제 설정 서버에 연결하기 위해 필요한 클라이언트 설정을 가지고 있다.
+이 파일은 spring.application.name 속성에 지정된 애플리케이션 이름을 제외하고는 모든 클라이언트에 대해 동일한 내용을 갖는다.
+아래 예시에서는 애플리케이션 이름을 'product'로 설정했다.
+
+```yaml
+spring.config.import: "configserver:"
+spring:
+  application.name: product
+  cloud.config:
+    failFast: true
+    retry:
+      initialInterval: 3000
+      multiplier: 1.3
+      maxInterval: 10000
+      maxAttempts: 20
+    uri: http://localhost:8888
+    username: ${CONFIG_SERVER_USR}
+    password: ${CONFIG_SERVER_PWD}
+---
+spring.config.activate.on-profile: docker
+spring.cloud.config.uri: http://config-server:8888
+```
+
+1. Docker 외부에서 실행될 때는 http://localhost:8888 URL을 사용하여 구성 서버에 연결하고, Docker 컨테이너 내에서 실행될 때는 http://config-server:8888 URL을 사용하여 구성 서버에 연결한다.
+2. 클라이언트의 사용자 이름과 비밀번호로 CONFIG_SERVER_USR 및 CONFIG_SERVER_PWD 속성의 값에 기반한 HTTP basic authentication을 사용한다.
+3. 필요한 경우 시작 시 20번까지 설정 서버에 재연결을 시도.
+4. 연결 시도가 실패한 경우 클라이언트는 처음으로 3초 동안 대기한 후 재연결을 시도. 
+5. 다음 재시도를 위한 대기 시간은 1.3배씩 증가.
+6. 연결 시도 간 최대 대기 시간은 10초.
+7. 클라이언트가 20번의 시도 후에도 설정 서버에 연결할 수 없으면 시작이 실패한다.
+
+이 구성은 일반적으로 설정 서버와의 일시적인 연결 문제에 대한 회복력을 갖추기에 좋다. 이는 특히 마이크로서비스의 전체 랜드스케이프와 그 설정 서버가 한 번에 시작될 때, 예를 들어 'docker-compose up' 명령을 사용할 때 유용하다.
+이 시나리오에서 많은 클라이언트들이 준비가 되기 전에 설정 서버에 연결하려고 시도하고, 재시도 로직은 설정 서버가 실행되고 나면 클라이언트들이 성공적으로 연결하게 한다.
+
+### 설정 저장소 구조화하기
+각 클라이언트의 소스 코드에서 설정 파일을 설정 저장소로 이동한 후에는, 예를 들어, actuator 엔드포인트의 구성 및 Eureka, RabbitMQ, Kafka에 연결하는 방법에 대한 설정 등 많은 설정 파일에서 공통된 설정을 가질 것이다.
+공통 부분은 application.yml이라는 공통 설정 파일에 위치하게 된다. 이 파일은 모든 클라이언트가 공유한다. 설정 저장소는 다음과 같은 파일들을 포함하고 있다.
+
+```text
+config-repo/
+├── application.yml
+├── auth-server.yml
+├── eureka-server.yml
+├── gateway.yml
+├── product-composite.yml
+├── product.yml
+├── recommendation.yml
+└── review.yml
+```
+
+### Spring Cloud Config Server 사용해보기
+
+> - 먼저, 소스에서 빌드하고 테스트 스크립트를 실행하여 모든 것이 잘 맞아떨어지는지 확인한다.
+> - 다음으로, 마이크로서비스의 설정을 검색하기 위해 설정 서버 API를 시험해 본다.
+> - 마지막으로, 예를 들어 비밀번호와 같은 민감한 정보를 암호화하고 복호화하는 방법을 살펴본다.
+
+### 자동화 테스트
+1. 빌드 도커 이미지
+```shell
+./gradlew build && docker-compose build
+```
+
+2. Docker에서 시스템 랜드스케이프 기동 & 테스트
+```shell
+./test-em-all.bash start
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
