@@ -2881,19 +2881,331 @@ config-repo/
 ```
 
 
+## Improving Resilience Using Resilience4j
+
+서킷 브레이커, 타임 리미터, 그리고 재시도 메커니즘은 두 소프트웨어 컴포넌트 간의 동기식 통신에서 유용하게 사용될 수 있다.
+예를 들면, 마이크로서비스와 같은 경우다. 이번에는 이러한 메커니즘들을 한 곳에 적용해보겠다. 바로 'product-composite' 서비스가 'product' 서비스에 요청을 보내는 곳이다.
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_13_01.png)
+
+### 서킷 브레이커 (Circuit Breaker)
+
+![](https://static.packt-cdn.com/products/9781805128694/graphics/Images/B19825_13_02.png)
+
+> - 서킷 브레이커가 너무 많은 오류를 감지하면 회로를 열게 된다. 즉, 새로운 호출을 허용하지 않는다.
+> - 회로가 열린 상태에서 서킷 브레이커는 fail-fast 로직을 수행한다. 이는 후속 호출에서 새로운 오류, 예를 들어 타임아웃 등이 발생하는 것을 기다리지 않고, 대신에 호출을 바로 폴백(fallback: 어떤 기능이 약해지거나 제대로 동작하지 않을 때, 이에 대처하는 기능 또는 동작) 메소드로 리디렉션한다는 의미이다.
+    폴백 메소드는 다양한 비즈니스 로직을 적용하여 최선의 노력으로 응답을 생성할 수 있다. 예를 들어, 폴백 메소드는 로컬 캐시에서 데이터를 반환하거나 단순히 즉시 오류 메시지를 반환할 수 있다.
+    이것은 해당 서비스가 의존하는 다른 서비스들이 정상적으로 응답하지 않으면 마이크로서비스가 반응하지 않게 되는 것을 방지한다. 특히 고부하 상황에서 유용하다.
+> - 일정 시간 후에 서킷 브레이커는 'half-open' 상태가 되어 실패 원인이 사라진 경우인지 확인하기 위해 새로운 호출들을 허용한다. 만약 서킷 브레이커가 새롭게 발생한 실패들을 감지한다면, 다시 회로를 열고 fail-fast 로직으로 돌아간다.
+    그렇지 않다면, 회로를 닫고 정상 작동 상태로 돌아간다. 이러한 작동 방식은 마이크로서비스가 장애에 대해 복원력있다거나 자체 복구능력(self-healing)를 가진다고 할 수 있으며, 이런 기능은 서로 동기식으로 통신하는 마이크로서비스의 시스템 환경에서 필수적이다.
 
 
+Resilience4j는 런타임 시점에서 여러 방법으로 서킷브레이커의 정보를 노출시키고 있다.
+
+> - 서킷 브레이커의 현재 상태는 마이크로서비스의 액추에이터(actuator) 건강 상태 엔드포인트인 '/actuator/health'를 사용하여 모니터링할 수 있다.
+> - 또한 서킷 브레이커는 액추에이터 엔드포인트에서 이벤트를 발행합니다. 예를 들어, 상태 전환과 '/actuator/circuitbreakerevents' 등이다.
+> - 마지막으로, 서킷 브레이커는 Spring Boot의 메트릭 시스템과 통합되어 있으며, 이를 사용하여 Prometheus와 같은 모니터링 도구에 메트릭을 발행할 수 있다.
+
+Resilience4j의 설정값에 대한 설명:
+
+> - slidingWindowType: 서킷 브레이커가 열릴 필요가 있는지 판단하기 위해, Resilience4j는 슬라이딩 윈도우를 사용하여 최근의 이벤트를 계산한다. 슬라이딩 윈도우는 고정된 수의 호출 또는 고정된 경과 시간을 기반으로 할 수 있다. 이 매개변수는 어떤 유형의 슬라이딩 윈도우를 사용할지 설정하는 데 사용된다. COUNT_BASED로 설정하여 횟수 기반의 슬라이딩 윈도우를 사용한다.
+> - slidingWindowSize: 회로가 열려야 하는지 여부를 결정하는 데 사용되는 닫힌 상태에서의 호출 수. 이 매개변수를 5로 설정한다.
+> - failureRateThreshold: 서킷을 열게 될 실패한 호출에 대한 백분율 임계값. 이 매개변수를 50%로 설정한다. 이 설정은 slidingWindowSize가 5로 설정된 것과 함께, 마지막 다섯 번의 호출 중 세 번 이상이 오류인 경우에 서킷을 열게 된다.
+> - automaticTransitionFromOpenToHalfOpenEnabled: 대기 기간이 종료되면 서킷 브레이커가 자동으로 half-open 상태로 전환할 지 여부를 결정한다. 그렇지 않으면, 대기 기간 종료 후 첫 번째 호출까지 half-open 상태로 전환하기 위해 기다린다. 이 매개변수를 true로 설정한다.
+> - waitDurationInOpenState: 회로가 open 상태인 즉, half-open 상태로 전환하기 전에 얼마나 오래 지속되어야 하는지 명시한다. 이 매개변수를 10000ms(10초) 로 설정한다.
+> - permittedNumberOfCallsInHalfOpenState: half-open 상태에서의 호출 횟수로, 이는 회로가 다시 열릴지 아니면 정상적인 닫힌 상태로 돌아갈지 결정하는 데 사용된다. 이 매개변수를 3으로 설정한다. 즉, 서킷 브레이커는 회로가 half-open 상태로 전환된 후 첫 세 번의 호출을 기반으로 회로가 열릴지 닫힐지를 결정하게 된다. failureRateThreshold 매개변수가 50%로 설정되어 있으므로, 세 번의 호출 중 두 번이나 모두 실패하면 회로는 다시 열린다. 그렇지 않으면, 회로는 닫힌다.
+> - ignoreExceptions: 오류로 간주되어서는 안 되는 예외 사항을 명시하는데 사용할 수 있다.
+> - registerHealthIndicator = true : Resilience4j에서 헬스 체크 엔드포인트에 서킷 브레이커의 상태에 대한 정보를 채우도록 활성화한다.
+> - allowHealthIndicatorToFail = false : Resilience4j에게 헬스 체크 엔드포인트의 상태에 영향을 주지 않도록 지시한다. 헬스 체크 엔드포인트가 여전히 'UP'으로 보고되며, 컴포넌트의 서킷 브레이커 중 하나가 open 또는 half-open 상태라 해도 마찬가지이다.
+> - 마지막으로 Resilience4j가 제공하는 서킷브레이커 헬스 체크 엔드포인트를 스프링부트 액츄에이터에 추가한다.
+```yaml
+management.health.circuitbreakers.enabled: true
+```
+
+### 타임 리미터 (Time Limiter)
+서킷 브레이커가 느리거나 반응하지 않는 서비스를 처리하는 데 도움이 되도록, 타임아웃 메커니즘이 유용할 수 있다.
+Resilience4j의 타임아웃 메커니즘인 TimeLimiter는 표준 Spring Boot 설정 파일을 사용하여 구성할 수 있다.
+
+> - timeoutDuration: TimeLimiter 인스턴스가 호출 완료를 기다리는 시간을 명시. 이 시간이 지나면 타임아웃 예외가 발생한다. 이 값을 2초로 설정한다.
+
+### 재시도 (Retry) 메커니즘
+재시도 메커니즘은 일시적인 네트워크 문제와 같은 랜덤하고 드물게 발생하는 오류에 매우 유용하다. 재시도 메커니즘은 실패한 요청을 시도 사이에 설정 가능한 지연 시간을 두고 여러 번 재시도할 수 있다.
+재시도 메커니즘의 사용에는 매우 중요한 제한 조건이 있는데, 그것은 재시도하는 서비스가 멱등성(idempotent)을 가져야 한다는 것이다. 즉, 동일한 요청 매개변수로 서비스를 한 번이나 여러 번 호출하면 결과가 동일해야 한다.
+예를 들어, 정보를 읽는 것은 멱등성을 가지지만, 정보를 생성하는 것은 대체로 그렇지 않다. 첫 번째 주문 생성의 응답이 네트워크에서 손실했기 때문에 재시도 메커니즘이 실수로 두 개의 주문을 만들어내는 상황은 바람직하지 않다.
+
+Resilience4j는 이벤트와 메트릭에 대해 서킷 브레이커와 같은 방식으로 재시도 정보를 제공하지만 건강 정보(health information)는 제공하지 않는다.
+재시도 이벤트는 액추에이터 엔드포인트 '/actuator/retryevents'에서 접근할 수 있다. Resilience4j의 표준 Spring Boot 설정 파일을 사용하여 구성함으로써 재시도 로직을 제어할 수 있다.
+
+> - maxAttempts: 첫 번째 호출을 포함하여 포기하기 전까지의 시도 횟수. 이 매개변수를 3으로 설정하여, 초기 실패 호출 후 최대 두 번의 재시도를 허용한다.
+> - waitDuration: 다음 재시도 시도 전 대기 시간. 이 값을 1000ms로 설정한다. 즉, 재시도 사이에 1초 동안 대기하게 된다.
+> - retryExceptions: 재시도를 트리거할 예외 목록. 우리는 HTTP 요청이 500 상태 코드로 응답할 때, 즉 InternalServerError 예외 발생 시에만 재시도를 트리거하게 된다.
+
+### Resilience(탄력성) 메커니즘 소스코드에 추가하기
+> - 빌드 파일에 Resilience4j에 대한 스타터 의존성을 추가
+> - 탄력성 메커니즘이 적용될 소스 코드에 주석을 추가
+> - 탄력성 메커니즘의 동작을 제어하는 설정을 추가
+
+의존성 추가
+```groovy
+ext {
+   resilience4jVersion = "2.0.2"
+}
+dependencies {
+    implementation "io.github.resilience4j:resilience4j-spring-
+boot2:${resilience4jVersion}"
+    implementation "io.github.resilience4j:resilience4j-reactor:${resilience4jVersion}"
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    ...
+```
+
+예전 버전의 Resilience4j 를 덮어쓰지 않기 위해 BOM 추가
+```groovy
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        mavenBom "io.github.resilience4j:resilience4j-bom:${resilience4jVersion}"
+    }
+}
+```
+
+`@CircuitBreaker` 어노테이션을 붙임으로써 서킷브레이커를 적용할 수 있다. ProductCompositeIntegration 클래스의 getProduct() 메소드에 적용해보자.
+서킷브레이커는 타임아웃이 아닌 예외에 의해 발생한다. 타임아웃에 의해서도 서킷브레이커를 발동시키기 위해 @TimeLimiter(...) 어노테이션을 추가한다.
+```java
+@TimeLimiter(name = "product")
+@CircuitBreaker(
+     name = "product", fallbackMethod = "getProductFallbackValue")
+public Mono<Product> getProduct(
+  int productId, int delay, int faultPercent) {
+  ...
+}
+```
+
+#### fail-fast 폴백 로직
+```java
+private Mono<Product> getProductFallbackValue(int productId,
+        int delay, int faultPercent, CallNotPermittedException ex) {
+        if (productId == 13) {
+        String errMsg = "Product Id: " + productId
+        + " not found in fallback cache!";
+        throw new NotFoundException(errMsg);
+        }
+        return Mono.just(new Product(productId, "Fallback product"
+        + productId, productId, serviceUtil.getServiceAddress()));
+        }
+```
+
+### 설정 추가 (product-composite.yml)
+```yaml
+resilience4j.timelimiter:
+  instances:
+    product:
+      timeoutDuration: 2s
+management.health.circuitbreakers.enabled: true
+resilience4j.circuitbreaker:
+  instances:
+    product:
+      allowHealthIndicatorToFail: false
+      registerHealthIndicator: true
+      slidingWindowType: COUNT_BASED
+      slidingWindowSize: 5
+      failureRateThreshold: 50
+      waitDurationInOpenState: 10000
+      permittedNumberOfCallsInHalfOpenState: 3
+      automaticTransitionFromOpenToHalfOpenEnabled: true
+      ignoreExceptions:
+        - se.magnus.api.exceptions.InvalidInputException
+        - se.magnus.api.exceptions.NotFoundException
+```
+
+### Retry 메커니즘 추가
+```java
+  @Retry(name = "product")
+  @TimeLimiter(name = "product")
+  @CircuitBreaker(name = "product", fallbackMethod =
+    "getProductFallbackValue")
+  public Mono<Product> getProduct(int productId, int delay, 
+    int faultPercent) {
+```
+```yaml
+resilience4j.retry:
+  instances:
+    product:
+      maxAttempts: 3
+      waitDuration: 1000
+      retryExceptions:
+      - org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError
+```
+
+### 자동화 테스트
+
+필요한 검증을 수행하기 위해서는, 에지 서버를 통해 노출되지 않은 product-composite 마이크로서비스의 액추에이터 엔드포인트에 접근할 필요가 있다.
+따라서, Docker Compose exec 명령어를 사용하여 product-composite 마이크로서비스에서 명령을 실행하여 액추에이터 엔드포인트에 접근한다.
+마이크로서비스에서 사용하는 기본 이미지인 Eclipse Temurin은 curl을 번들링하고 있으므로, product-composite 컨테이너에서 curl 명령어를 단순히 실행하여 필요한 정보를 얻을 수 있다.
+
+```shell
+docker-compose exec -T product-composite curl -s http://product-composite:8080/actuator/health
+```
+
+테스트에 필요한 정보를 추출하기 위해, 출력을 jq 도구로 파이핑할 수 있다. 예를 들어, 서킷 브레이커의 실제 상태를 추출하기 위해 다음 명령어를 실행할 수 있다.
+```shell
+docker-compose exec -T product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
+
+실제 상태에 따라 CLOSED, OPEN 또는 HALF_OPEN 중 하나를 반환한다. 테스트는 이렇게 시작되는데, 테스트가 실행되기 전에 서킷 브레이커가 닫혀 있는지 확인한다.
+```shell
+assertEqual "CLOSED" "$(docker-compose exec -T product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+```
+
+다음으로, 테스트는 연속으로 세 개의 명령을 실행하여 제품 서비스로부터 느린 응답으로 인한 타임아웃 실패를 발생시켜서 서킷 브레이커를 열게 한다. (지연 매개변수는 3초로 설정됨)
+```shell
+for ((n=0; n<3; n++))
+do
+    assertCurl 500 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS?delay=3 $AUTH -s"
+    message=$(echo $RESPONSE | jq -r .message)
+    assertEqual "Did not observe any item or terminal signal within 2000ms" "${message:0:57}"
+done
+```
+> `Tip` 구성에 대한 간단한 알림입니다: 제품 서비스의 타임아웃은 2초로 설정되어 있으므로 3초의 지연은 타임아웃을 발생시킨다. 서킷 브레이커는 닫혔을 때 마지막 다섯 개의 호출을 평가하도록 구성되어 있다.
+> 서킷 브레이커와 관련된 테스트 이전에 스크립트에서 이미 몇 번의 성공적인 호출을 수행했다. 실패 임계값은 50%로 설정되어 있으며, 3초 지연이 있는 세 번의 호출은 서킷을 열기에 충분하다.
+
+서킷이 열려 있을 때, 우리는 fail-fast 행동을 기대한다. 즉, 응답을 받기 전에 타임아웃을 기다릴 필요가 없다.
+또한 최선의 노력으로 응답을 반환하기 위해 대체 메서드가 호출되기를 기대한다. 이는 정상적인 호출, 즉 지연 요청 없이도 적용되어야 한다.
+```shell
+assertEqual "OPEN" "$(docker-compose exec -T product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS?delay=3 $AUTH -s"
+assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $AUTH -s"
+assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+```
+
+### 빌드 & 테스트
+```shell
+./gradlew build && docker-compose build
+./test-em-all.bash start
+```
 
 
+### 정상적인 운영 상황에서 서킷이 닫혀있는지 확인
+```shell
+unset ACCESS_TOKEN
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq -r .access_token)
+echo $ACCESS_TOKEN
+```
 
+```shell
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1 -w "%{http_code}\n" -o /dev/null -s
+```
+> `Tip` `-w "%{http_code}\n"` 스위치는 HTTP 응답 상태를 출력하기 위해 사용된다. 200 응답을 반환하는 한, 응답 본문에는 관심이 없으므로 `-o /dev/null` 스위치를 사용하여 응답 본문을 무시한다.
 
+서킷 브레이커가 닫혀있는지 확인하는 health API
+```shell
+docker-compose exec product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
 
+### 무언가 잘못되었을 때 서킷 브레이커가 열리도록 강제
+이하 API를 세 번 호출하면 3초 지연되는 응답을 매번 발생시키므로 서킷 브레이커가 발동된다.
+```shell
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?delay=3 -s | jq .
+```
 
+그럼 네 번째 요청에서 fail-fast 행동, 즉 fallback 메서드가 호출되는지 확인한다. 'Fallback product1' 응답이 오는지 확인한다.
 
+```shell
+$ curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?delay=3 -s | jq .
+{
+  "productId": 1,
+  "name": "Fallback product1",
+  "weight": 1,
+  "recommendations": [
+    {
+      "recommendationId": 1,
+      "author": "author 1",
+      "rate": 1,
+      "content": "content 1"
+    },
+    {
+      "recommendationId": 2,
+      "author": "author 2",
+      "rate": 2,
+      "content": "content 2"
+    },
+...
+```
 
+> `Tip` fail-fast와 대체 메서드(fallback method)는 서킷 브레이커의 주요 기능이다. 오픈 상태에서 대기 시간을 단 10초로 설정한 구성은 fail-fast 로직과 대체 메서드가 작동하는 것을 보려면 꽤 빠르게 반응해야 한다!
+> 반개방(half-open) 상태에 들어간 후에는 항상 타임아웃을 유발하는 세 개의 새로운 요청을 제출할 수 있으며, 이로 인해 서킷 브레이커가 다시 열린 상태로 돌아가고 그 후 네 번째 요청을 빠르게 시도할 수 있다.
+> 그럼 그 때 대체 메서드에서 fail-fast 응답을 받게 된다. 대기 시간을 1분 또는 2분으로 증가시킬 수도 있지만, 서킷이 반개방 상태로 전환되기 전에 그만큼의 시간 동안 기다리는 것은 다소 지루할 수 있다.
 
+서킷브레이커가 half-open 상태로 전환되기를 10초 기다린 후, 이하 커맨드로 확인.
+```shell
+docker-compose exec product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
 
+### 다시 서킷브레이커 닫기
+정상 API를 세번 호출한다.
+```shell
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1 -w "%{http_code}\n" -o /dev/null -s
+```
 
+모두 200 응답을 받은 후 health API를 호출해본다. `CLOSED` 응답이 나올 것.
+```shell
+docker-compose exec product-composite curl -s http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
+
+마지막 세개의 스테이트 변화 목록을 출력해본다.
+```shell
+docker-compose exec product-composite curl -s http://product-composite:8080/actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r '.circuitBreakerEvents[-3].stateTransition, .circuitBreakerEvents[-2].stateTransition, .circuitBreakerEvents[-1].stateTransition'
+```
+
+### 무작위 에러를 통한 재시도 메커니즘 테스트
+
+faultPercent 매개변수를 사용하여 이를 수행할 수 있다. 25로 설정하면, 평균적으로 네 번째 요청마다 실패하는 것을 기대한다. 실패한 요청을 자동으로 재시도하는 재시도 메커니즘이 도움을 줄 것을 기대한다.
+재시도 메커니즘이 작동했는지 확인하는 한 가지 방법은 curl 명령의 응답 시간을 측정하는 것이다. 정상적인 응답은 약 100ms가 소요된다.
+재시도 메커니즘을 1초 대기하도록 구성했으므로(재시도 메커니즘 구성 섹션에서 waitDuration 매개변수 참조), 각 재시도 시도마다 응답 시간이 1초씩 증가할 것으로 예상된다.
+
+```shell
+time curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?faultPercent=25 -w "%{http_code}\n" -o /dev/null -s
+```
+응답:
+```shell
+time curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?faultPercent=25 -w "%{http_code}\n" -o /dev/null -s
+200
+
+real    0m0.091s
+```
+```shell
+time curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?faultPercent=25 -w "%{http_code}\n" -o /dev/null -s
+200
+
+real    0m1.128s
+```
+
+리트라이 되었을 때 마지막 두개 이벤트 타입 출력해보기
+```shell
+docker-compose exec product-composite curl -s http://product-composite:8080/actuator/retryevents | jq '.retryEvents[-2], .retryEvents[-1]'
+```
+응답:
+```shell
+{
+  "retryName": "product",
+  "type": "RETRY",
+  "creationTime": "2023-09-25T05:17:45.489884255Z[Etc/UTC]",
+  "errorMessage": "org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError: 500 Internal Server Error from GET http://ee5730e685e2:8080/product/1?delay=0&faultPercent=25",
+  "numberOfAttempts": 1
+}
+{
+  "retryName": "product",
+  "type": "SUCCESS",
+  "creationTime": "2023-09-25T05:17:46.499171207Z[Etc/UTC]",
+  "errorMessage": "org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError: 500 Internal Server Error from GET http://ee5730e685e2:8080/product/1?delay=0&faultPercent=25",
+  "numberOfAttempts": 1
+}
+```
+
+### 테스트 종료
+```shell
+docker-compose down
+```
 
 
 
